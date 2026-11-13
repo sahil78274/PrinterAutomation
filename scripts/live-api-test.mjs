@@ -51,8 +51,8 @@ async function apiIsUp() {
 
 // A Vite server in middleware mode gives us `import.meta.env` exactly as the
 // real bundle sees it, so the live switch is tested through the same code path.
-async function loadServices(apiBaseUrl) {
-  // `undefined` simulates the variable being absent entirely (mock mode).
+async function loadServices(apiBaseUrl, { liveData = false } = {}) {
+  // `undefined` simulates the variable being absent entirely.
   // An empty string is a *real* configuration meaning "same origin".
   const server = await createServer({
     server: { middlewareMode: true },
@@ -61,6 +61,7 @@ async function loadServices(apiBaseUrl) {
     define: {
       'import.meta.env.VITE_API_BASE_URL':
         apiBaseUrl === undefined ? 'undefined' : JSON.stringify(apiBaseUrl),
+      'import.meta.env.VITE_API_LIVE_DATA': JSON.stringify(liveData ? 'true' : 'false'),
     },
   });
 
@@ -74,12 +75,19 @@ console.log(`\nLive-API wiring test (API at ${API_ORIGIN}: ${up ? 'up' : 'down'}
 
 /* -------------------------------------------------------------- mock mode --- */
 
-console.log('Mock mode (VITE_API_BASE_URL not defined)');
+console.log('Mock mode (VITE_API_LIVE_DATA not set)');
 {
   const { server, api, client } = await loadServices(undefined);
   try {
+    // Business endpoints stay on mock data until the routes exist and are
+    // authenticated — independent of whether a dev API is reachable.
     check('isLiveMode is false', api.isLiveMode === false);
-    check('base URL resolves to same origin', client.resolveBaseUrl() === '');
+    // With the variable absent, development now defaults to the dev API origin.
+    check(
+      'base URL defaults to the dev API origin',
+      client.resolveBaseUrl() === 'http://localhost:5000',
+      client.resolveBaseUrl(),
+    );
 
     const shops = await api.getShops();
     check('getShops returns seeded shops', Array.isArray(shops) && shops.length > 0);
@@ -101,28 +109,51 @@ console.log('Mock mode (VITE_API_BASE_URL not defined)');
 
 /* -------------------------------------------------------------- live mode --- */
 
-console.log('\nLive mode (VITE_API_BASE_URL set)');
+console.log('\nLive data mode (VITE_API_LIVE_DATA=true)');
 {
-  const { server, api } = await loadServices(API_ORIGIN);
+  const { server, api } = await loadServices(API_ORIGIN, { liveData: true });
   try {
     check('isLiveMode is true', api.isLiveMode === true);
 
     if (!up) {
       skip('live requests', 'API is not running');
     } else {
-      // /api/shops is admin-guarded and returns 404 without
-      // ALLOW_ANONYMOUS_ADMIN, so this exercises the *error* path end to end.
+      // /api/shops now requires a session. Without a token the API must refuse
+      // — and the client must surface that refusal rather than silently
+      // substituting mock shops, which would look like a working login wall.
       const guarded = await api.getShops().catch((error) => error);
       check(
-        'guarded endpoint surfaces the server error, not mock data',
-        guarded?.name === 'ApiClientError' && (guarded.status === 404 || guarded.status === 503),
-        guarded?.message,
+        'an unauthenticated request surfaces the server error, not mock data',
+        guarded?.name === 'ApiClientError' && guarded.status === 401,
+        `${guarded?.status} ${guarded?.code ?? ''} ${guarded?.message ?? ''}`,
+      );
+      check(
+        'the error carries a stable machine-readable code',
+        guarded?.code === 'AUTH_REQUIRED',
+        guarded?.code,
       );
       check(
         'server error carries a request id',
         typeof guarded?.requestId === 'string' && guarded.requestId.length > 0,
         `requestId=${guarded?.requestId}`,
       );
+
+      // A real end-to-end login proves the live auth path, not just the 401.
+      const login = await api
+        .login({ email: 'owner@smartprint.in', password: 'demo1234' })
+        .catch((error) => error);
+
+      if (login?.name === 'ApiClientError') {
+        // The demo accounts live in the mock seed, not the database, so this
+        // asserting a clean refusal is correct behaviour for a live API.
+        check(
+          'unknown live credentials are refused cleanly',
+          login.status === 401,
+          `${login.status} ${login.code}`,
+        );
+      } else {
+        check('live login returns a token', typeof login?.token === 'string' && login.token.length > 20);
+      }
     }
   } finally {
     await server.close();
@@ -134,7 +165,7 @@ console.log('\nLive mode (VITE_API_BASE_URL set)');
 console.log('\nFallback (live mode, unreachable server)');
 {
   // Port 59321 is deliberately closed.
-  const { server, api } = await loadServices('http://127.0.0.1:59321');
+  const { server, api } = await loadServices('http://127.0.0.1:59321', { liveData: true });
   const originalWarn = console.warn;
   console.warn = () => {};
   try {
@@ -149,18 +180,45 @@ console.log('\nFallback (live mode, unreachable server)');
   }
 }
 
-/* ------------------------------------------------- live mode, same origin --- */
+/* ------------------------------------------------------ base URL resolution --- */
 
-console.log('\nLive mode with an empty base URL (same origin)');
+console.log('\nBase URL resolution');
 {
-  const { server, api, client } = await loadServices('');
-  try {
-    // An empty value is how vite.config.js proxies /api to :5000, so it must
-    // mean "live", not "mock" — testing truthiness here was the original bug.
-    check('isLiveMode is true for an empty base URL', api.isLiveMode === true);
-    check('base URL resolves to same origin', client.resolveBaseUrl() === '');
-  } finally {
-    await server.close();
+  // Absent => dev default of http://localhost:5000, so the health call is a
+  // visible cross-origin request in DevTools rather than a proxied one.
+  {
+    const { server, client } = await loadServices(undefined, { liveData: false });
+    try {
+      check(
+        'absent base URL defaults to http://localhost:5000',
+        client.resolveBaseUrl() === 'http://localhost:5000',
+      );
+    } finally {
+      await server.close();
+    }
+  }
+
+  // Explicit empty => same origin, the production/proxy configuration.
+  {
+    const { server, client } = await loadServices('');
+    try {
+      check('empty base URL resolves to same origin', client.resolveBaseUrl() === '');
+    } finally {
+      await server.close();
+    }
+  }
+
+  // Explicit value wins and is trimmed of trailing slashes.
+  {
+    const { server, client } = await loadServices('http://api.example.test:8080///');
+    try {
+      check(
+        'explicit base URL wins and is normalised',
+        client.resolveBaseUrl() === 'http://api.example.test:8080',
+      );
+    } finally {
+      await server.close();
+    }
   }
 }
 
@@ -168,13 +226,14 @@ console.log('\nLive mode with an empty base URL (same origin)');
 
 console.log('\nError handling');
 {
-  const { server, client } = await loadServices(undefined);
+  // Point the client at a closed port so the transport really fails.
+  const { server, client } = await loadServices('http://127.0.0.1:59322');
   try {
-    // An unroutable address must produce a typed error, never a hang.
+    // A relative path must resolve against the base URL, and an unreachable
+    // host must produce a typed error rather than a hang. Uses the module's own
+    // default origin (http://localhost:5000) with a port nothing listens on.
     const started = Date.now();
-    const error = await client
-      .request('http://127.0.0.1:59322/api/health', { timeoutMs: 800 })
-      .catch((e) => e);
+    const error = await client.request('/api/health', { timeoutMs: 800 }).catch((e) => e);
     const elapsed = Date.now() - started;
 
     check('unreachable host raises ApiClientError', error?.name === 'ApiClientError');

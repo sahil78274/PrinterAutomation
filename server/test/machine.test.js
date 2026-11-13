@@ -146,10 +146,28 @@ describe('validateRegisterMachine', () => {
     assert.equal(value.status, undefined);
   });
 
-  test('requires a name and a valid shop id', () => {
-    const { errors } = validateRegisterMachine({ shopId: 'not-an-object-id' });
-    assert.ok(errors.shopId);
+  test('requires a name', () => {
+    const { errors } = validateRegisterMachine({ shopId: 'anything' });
     assert.ok(errors.name);
+  });
+
+  test('does not require shopId from the body — tenancy comes from the token', () => {
+    // The owning shop is resolved by resolveShopScope from the caller's session.
+    // Accepting it from the body would let an owner create a machine on another
+    // shop simply by changing a form field.
+    const { errors } = validateRegisterMachine({ name: 'Counter A' });
+    assert.equal(errors.shopId, undefined);
+  });
+
+  test('passes a body-supplied shopId through opaquely rather than validating its shape', () => {
+    // Ids are opaque strings across adapters, so an ObjectId-shaped regex would
+    // wrongly reject every id the in-memory adapter issues.
+    const { value, errors } = validateRegisterMachine({
+      name: 'Counter A',
+      shopId: 'shop-uuid-123',
+    });
+    assert.equal(errors.shopId, undefined);
+    assert.equal(value.shopId, 'shop-uuid-123');
   });
 
   test('rejects non-integer money values', () => {

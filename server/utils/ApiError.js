@@ -56,6 +56,15 @@ export default class ApiError extends Error {
     return new ApiError(429, message, options);
   }
 
+  static payloadTooLarge(message = 'That file is too large', options) {
+    return new ApiError(413, message, options);
+  }
+
+  /** Payment required — a distinct 402 so clients can branch on it cheaply. */
+  static paymentRequired(message = 'Payment is required', options) {
+    return new ApiError(402, message, options);
+  }
+
   static internal(message = 'Internal server error', options) {
     return new ApiError(500, message, { expose: false, ...options });
   }
@@ -73,6 +82,8 @@ function defaultCode(statusCode) {
     404: 'NOT_FOUND',
     409: 'CONFLICT',
     422: 'VALIDATION_ERROR',
+    402: 'PAYMENT_REQUIRED',
+    413: 'PAYLOAD_TOO_LARGE',
     429: 'RATE_LIMITED',
     500: 'INTERNAL_ERROR',
     503: 'SERVICE_UNAVAILABLE',

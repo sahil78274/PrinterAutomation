@@ -1,26 +1,48 @@
 import { Router } from 'express';
 import {
+  approveShopHandler,
   createShopHandler,
+  getMyShopHandler,
   getShopHandler,
   listShopsHandler,
+  updateShopStatusHandler,
 } from '../controllers/shopController.js';
 import validate from '../middleware/validate.js';
-import requireDatabase from '../middleware/requireDatabase.js';
-import devOnlyAdmin from '../middleware/devOnly.js';
-import { validateCreateShop } from '../validators/shopValidator.js';
+import {
+  authenticate,
+  requireRole,
+  requireShopUser,
+  resolveShopScope,
+} from '../middleware/auth.js';
+import { validateCreateShop, validateShopStatus } from '../validators/shopValidator.js';
 
 const router = Router();
 
 /**
- * All shop routes are tenant-admin operations. They sit behind devOnlyAdmin
- * until Phase 3 replaces it with JWT + role checks.
+ * Shops.
+ *
+ * Every route here requires a session; there is no anonymous shop listing.
+ * `/me` is declared before `/:identifier` so it is not swallowed as a shop code.
  */
-// Guard first (404 for unauthorised), then validate input, then require the DB.
-router.use(devOnlyAdmin);
 
-router.post('/', validate(validateCreateShop), requireDatabase, createShopHandler);
-router.use(requireDatabase);
+router.use(authenticate);
+
+router.get('/me', requireShopUser, getMyShopHandler);
+
+router.post('/', requireRole('admin'), validate(validateCreateShop), createShopHandler);
+
 router.get('/', listShopsHandler);
-router.get('/:identifier', getShopHandler);
+
+router.post('/:identifier/approve', requireRole('admin'), approveShopHandler);
+
+router.patch(
+  '/:identifier/status',
+  requireRole('admin'),
+  validate(validateShopStatus),
+  updateShopStatusHandler,
+);
+
+// Declared last: `/:identifier` matches anything, so it must not shadow the rest.
+router.get('/:identifier', requireShopUser, resolveShopScope, getShopHandler);
 
 export default router;

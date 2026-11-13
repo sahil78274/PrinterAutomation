@@ -1,37 +1,108 @@
 import { Router } from 'express';
-import { createMachine, getMachineById, listMachines } from '../controllers/machineController.js';
+import {
+  createMachine,
+  getMachineById,
+  getMachineDetail,
+  getMachineQr,
+  listMachines,
+  rotateQrHandler,
+  updateMachinePricing,
+  updateMachineStatus,
+} from '../controllers/machineController.js';
 import validate from '../middleware/validate.js';
-import requireDatabase from '../middleware/requireDatabase.js';
-import devOnlyAdmin from '../middleware/devOnly.js';
 import { publicLimiter } from '../middleware/rateLimiters.js';
-import { validateMachineIdParam, validateRegisterMachine } from '../validators/machineValidator.js';
+import {
+  authenticate,
+  requirePermission,
+  requireShopUser,
+  resolveShopScope,
+  STAFF_PERMISSIONS,
+} from '../middleware/auth.js';
+import {
+  validateMachineIdParam,
+  validateRegisterMachine,
+  validateMachineStatus,
+  validateMachinePricing,
+} from '../validators/machineValidator.js';
 
 const router = Router();
 
 /**
- * Public QR resolution — the hottest endpoint in the product and the only one
- * an unauthenticated customer hits before ordering.
+ * Machines.
+ *
+ * Order matters. The public QR route is declared first and is the only
+ * unauthenticated path; everything below requires a session. Static segments
+ * (`/all`, `/:machineId/qr`) are declared before `/:machineId` so Express does
+ * not treat them as machine ids.
  */
+
+// --- Public: QR resolution ------------------------------------------------
 router.get(
   '/:machineId',
   publicLimiter,
-  // Validate the shape before touching infrastructure: a malformed ID is a
-  // client error (422) regardless of whether the database happens to be up.
   validate(validateMachineIdParam, 'params'),
-  requireDatabase,
   getMachineById,
 );
 
-/**
- * Shop-scoped listing. Requires an explicit shopId so a missing filter can never
- * turn into a cross-tenant dump.
- */
-router.get('/', requireDatabase, listMachines);
+// --- Authenticated: shop dashboard and admin ------------------------------
+router.get('/', authenticate, requireShopUser, resolveShopScope, listMachines);
 
-/**
- * Registration. Admin-scoped; guarded by devOnlyAdmin until authentication
- * lands in Phase 3.
- */
-router.post('/', devOnlyAdmin, validate(validateRegisterMachine), requireDatabase, createMachine);
+router.post(
+  '/',
+  authenticate,
+  requireShopUser,
+  resolveShopScope,
+  validate(validateRegisterMachine),
+  createMachine,
+);
+
+router.get(
+  '/:machineId/qr',
+  authenticate,
+  requireShopUser,
+  resolveShopScope,
+  validate(validateMachineIdParam, 'params'),
+  getMachineQr,
+);
+
+router.post(
+  '/:machineId/qr/rotate',
+  authenticate,
+  requireShopUser,
+  resolveShopScope,
+  validate(validateMachineIdParam, 'params'),
+  rotateQrHandler,
+);
+
+router.get(
+  '/:machineId/detail',
+  authenticate,
+  requireShopUser,
+  resolveShopScope,
+  validate(validateMachineIdParam, 'params'),
+  getMachineDetail,
+);
+
+router.patch(
+  '/:machineId/status',
+  authenticate,
+  requireShopUser,
+  requirePermission(STAFF_PERMISSIONS.manageMachines),
+  resolveShopScope,
+  validate(validateMachineIdParam, 'params'),
+  validate(validateMachineStatus),
+  updateMachineStatus,
+);
+
+router.patch(
+  '/:machineId/pricing',
+  authenticate,
+  requireShopUser,
+  requirePermission(STAFF_PERMISSIONS.managePricing),
+  resolveShopScope,
+  validate(validateMachineIdParam, 'params'),
+  validate(validateMachinePricing),
+  updateMachinePricing,
+);
 
 export default router;

@@ -292,14 +292,16 @@ describe('machine validator — registration body', () => {
     assert.equal(value.name, 'Counter A');
   });
 
-  test('requires a shopId', () => {
+  test('does not require a shopId in the body', () => {
+    // Superseded by real authentication: the shop is taken from the session, so
+    // a body shopId is optional and never trusted for tenancy.
     const { errors } = validateRegisterMachine({ ...body, shopId: undefined });
-    assert.match(errors.shopId, /required/);
+    assert.equal(errors.shopId, undefined);
   });
 
-  test('rejects a malformed shopId before any database call', () => {
-    const { errors } = validateRegisterMachine({ ...body, shopId: 'not-an-id' });
-    assert.match(errors.shopId, /valid/i);
+  test('accepts an opaque shop id of any adapter shape', () => {
+    const { errors } = validateRegisterMachine({ ...body, shopId: 'not-an-object-id' });
+    assert.equal(errors.shopId, undefined);
   });
 
   test('rejects negative prices', () => {

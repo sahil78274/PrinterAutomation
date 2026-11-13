@@ -2,6 +2,16 @@ import { Router } from 'express';
 import healthRoutes from './healthRoutes.js';
 import machineRoutes from './machineRoutes.js';
 import shopRoutes from './shopRoutes.js';
+import authRoutes from './authRoutes.js';
+import orderRoutes from './orderRoutes.js';
+import documentRoutes from './documentRoutes.js';
+import agentRoutes from './agentRoutes.js';
+import analyticsRoutes from './analyticsRoutes.js';
+import staffRoutes from './staffRoutes.js';
+import subscriptionRoutes from './subscriptionRoutes.js';
+import printJobRoutes from './printJobRoutes.js';
+import adminRoutes from './adminRoutes.js';
+import paymentRoutes from './paymentRoutes.js';
 import ApiError from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 
@@ -9,53 +19,71 @@ const router = Router();
 
 /**
  * GET /api
- * Tiny index so a developer hitting the API root discovers the surface.
+ * Discoverable index of the surface, so a developer hitting the API root does
+ * not have to read the source to find out what exists.
  */
 router.get('/', (req, res) =>
   sendSuccess(res, {
     name: 'SmartPrint API',
     version: '1.0.0',
-    documentation: '/api/health',
     endpoints: {
-      health: '/api/health',
-      readiness: '/api/health/ready',
+      health: 'GET /api/health',
+      readiness: 'GET /api/health/ready',
+      auth: {
+        register: 'POST /api/auth/register',
+        login: 'POST /api/auth/login',
+        refresh: 'POST /api/auth/refresh',
+        logout: 'POST /api/auth/logout',
+        me: 'GET /api/auth/me',
+        forgotPassword: 'POST /api/auth/password/forgot',
+        resetPassword: 'POST /api/auth/password/reset',
+        changePassword: 'POST /api/auth/password/change',
+      },
       machineByQr: 'GET /api/machines/:machineId',
       machinesByShop: 'GET /api/machines?shopId=<id>',
       registerMachine: 'POST /api/machines',
       shops: 'GET /api/shops',
+      orders: {
+        create: 'POST /api/orders',
+        tracking: 'GET /api/orders/:orderId',
+        pay: 'POST /api/orders/:orderId/pay',
+        confirm: 'POST /api/orders/:orderId/confirm',
+      },
+      documents: {
+        upload: 'POST /api/documents (multipart, field "file")',
+        download: 'GET /api/documents/:documentId/file',
+      },
+      agents: {
+        register: 'POST /api/agents/register',
+        heartbeat: 'POST /api/agents/heartbeat',
+        nextJob: 'GET /api/agents/jobs/next',
+        download: 'GET /api/agents/jobs/:jobId/document',
+        printing: 'POST /api/agents/jobs/:jobId/printing',
+        complete: 'POST /api/agents/jobs/:jobId/complete',
+        fail: 'POST /api/agents/jobs/:jobId/fail',
+      },
     },
   }),
 );
 
 router.use('/health', healthRoutes);
+router.use('/auth', authRoutes);
+router.use('/orders', orderRoutes);
+router.use('/documents', documentRoutes);
+router.use('/agents', agentRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/staff', staffRoutes);
+router.use('/subscriptions', subscriptionRoutes);
+router.use('/print-jobs', printJobRoutes);
+router.use('/admin', adminRoutes);
+router.use('/payments', paymentRoutes);
 router.use('/machines', machineRoutes);
 router.use('/shops', shopRoutes);
 
 /**
- * Reserved namespaces. Declaring them now means a future feature can be mounted
- * without any chance of colliding with an existing route, and a caller gets a
- * clear 501 instead of a confusing 404.
+ * Every namespace in the product brief is now mounted above. There are no
+ * reserved placeholders left: a 404 here means the URL is genuinely wrong,
+ * not that a feature is unbuilt.
  */
-const PLANNED = {
-  auth: 'Phase 3 — JWT authentication and role-based access control',
-  orders: 'Phase 3 — print order creation and lifecycle',
-  pricing: 'Phase 3 — quote calculation',
-  agents: 'Phase 4 — local Print Agent heartbeat and job claim',
-  analytics: 'Phase 5 — shop and platform reporting',
-  subscriptions: 'Phase 5 — plan management and invoicing',
-};
-
-router.use(
-  ['/auth', '/orders', '/pricing', '/agents', '/analytics', '/subscriptions'],
-  (req, res, next) => {
-    const segment = req.originalUrl.split('/')[2]?.split('?')[0];
-    next(
-      ApiError.notFound(
-        `${segment ? `The /api/${segment} namespace is reserved` : 'Endpoint reserved'} — ${PLANNED[segment] ?? 'not implemented yet'}`,
-        { code: 'NOT_IMPLEMENTED', expose: true },
-      ),
-    );
-  },
-);
 
 export default router;

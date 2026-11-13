@@ -46,6 +46,18 @@ const config = {
       .filter(Boolean),
     // True when the allowlist came from the dev fallback rather than config.
     isDefault: !process.env.CLIENT_URL,
+    /**
+     * Allow the loopback aliases in development.
+     *
+     * A browser treats http://localhost:5173 and http://127.0.0.1:5173 as two
+     * different origins, and Vite binds 0.0.0.0 so either can be used to open
+     * the app. Listing only "localhost" means half the normal dev URLs fail
+     * with a CORS error that looks like a backend outage.
+     *
+     * Development only, and only for loopback: production must name its
+     * origins explicitly.
+     */
+    allowLoopbackAliases: !isProduction,
   },
 
   mongo: {
@@ -83,6 +95,59 @@ const config = {
     // Placeholder so the CORS/helmet policy can be tightened per environment.
     exposeStackTraces: !isProduction,
   },
+
+  auth: {
+    /**
+     * Signing secret for access tokens.
+     *
+     * In production this MUST come from the environment — validateConfig
+     * refuses to boot otherwise. In development a per-process random secret is
+     * generated so tokens are never signed with a value that leaked into a
+     * repository. The consequence is honest: restarting the dev server
+     * invalidates every session.
+     */
+    jwtSecret: process.env.JWT_SECRET || null,
+    jwtSecretIsEphemeral: !process.env.JWT_SECRET,
+    issuer: 'smartprint',
+    audience: 'smartprint-api',
+    accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '15m',
+    refreshTokenTtlDays: toInt(process.env.REFRESH_TOKEN_TTL_DAYS, 30),
+    bcryptRounds: toInt(process.env.BCRYPT_ROUNDS, isTest ? 4 : 12),
+
+    /**
+     * Key required to create the *first* platform administrator.
+     *
+     * Bootstrapping an admin is a chicken-and-egg problem: there is nobody to
+     * grant the role. Rather than leaving an open "create admin" endpoint or
+     * shipping a default password in git, the endpoint demands a key that the
+     * operator sets in the environment. When it is unset the route is closed.
+     */
+    adminSetupKey: process.env.ADMIN_SETUP_KEY || null,
+    // Refresh tokens are stored hashed; this pepper is part of that hash.
+    refreshTokenPepper: process.env.REFRESH_TOKEN_PEPPER || '',
+    passwordResetTtlMinutes: toInt(process.env.PASSWORD_RESET_TTL_MINUTES, 30),
+  },
+
+  uploads: {
+    // PDFs only, and small enough that a base64 body can never be the path.
+    maxBytes: toInt(process.env.UPLOAD_MAX_BYTES, 25 * 1024 * 1024),
+    // Temporary store. Documents are deleted after the retention window.
+    dir: process.env.UPLOAD_DIR || path.resolve(__dirname, '..', 'storage', 'documents'),
+    retentionHours: toInt(process.env.DOCUMENT_RETENTION_HOURS, 24),
+  },
+
+  payments: {
+    /**
+     * The only provider implemented is the development simulator.
+     * validateConfig refuses to start production with it enabled.
+     */
+    provider: process.env.PAYMENT_PROVIDER || 'development',
+    platformFeeBps: toInt(process.env.PLATFORM_FEE_BPS, 600),
+  },
+
+  realtime: {
+    enabled: toBool(process.env.REALTIME_ENABLED, true),
+  },
 };
 
 /**
@@ -119,6 +184,21 @@ export function validateConfig({ requireMongo = true } = {}) {
     // Silently allowing only localhost in production looks fine in tests and
     // breaks every real browser, so it must stop the process at boot.
     errors.push('CLIENT_URL is not set. Production must list at least one real origin.');
+  }
+
+  // Production must not run on an ephemeral signing secret, or every deploy
+  // silently logs all users out and tokens cannot be verified across instances.
+  if (isProduction && !config.auth.jwtSecret) {
+    errors.push('JWT_SECRET must be set in production.');
+  }
+  if (config.auth.jwtSecret && String(config.auth.jwtSecret).length < 32 && isProduction) {
+    errors.push('JWT_SECRET must be at least 32 characters in production.');
+  }
+
+  // The development payment provider simulates success. Shipping it to
+  // production would mean printing for free.
+  if (isProduction && config.payments.provider === 'development') {
+    errors.push('PAYMENT_PROVIDER=development is not allowed in production.');
   }
 
   if (errors.length) {

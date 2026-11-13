@@ -1,20 +1,23 @@
-import Machine from '../models/Machine.js';
-import Shop from '../models/Shop.js';
+import { randomUUID } from 'node:crypto';
 import ApiError from '../utils/ApiError.js';
+import { getRepository } from '../repositories/active.js';
 
 /**
- * Machine ID issuance.
+ * Machine identity, registration and QR resolution.
  *
- * IDs follow SP-<n> and are allocated centrally. Two properties matter:
+ * Machine IDs follow `SP-<n>` and are allocated centrally, because a QR sticker
+ * must resolve to exactly one printer for its whole life. Three properties
+ * matter:
  *
- *  1. Uniqueness across the whole platform — a QR sticker must never resolve to
- *     two machines, so the numeric space is global, not per shop.
- *  2. Immutability — an issued ID is never reused or reassigned. If a printer is
- *     retired, its ID is retired with it.
+ *  1. **Global uniqueness** — the numeric space is platform-wide, not per shop.
+ *  2. **Immutability** — an issued ID is never reused or reassigned, even after
+ *     a printer is retired.
+ *  3. **Stable QR tokens** — the printed QR encodes a token that can be revoked
+ *     and rotated without renumbering the machine.
  *
- * Allocation uses the highest existing numeric suffix + 1, with a unique-index
- * retry loop to stay correct under concurrent registrations (two admins
- * registering at the same moment must not collide).
+ * Allocation reads the highest existing suffix and adds one, with a bounded
+ * retry loop so two concurrent registrations cannot collide (the unique index
+ * is the real guarantee; the retry makes collisions invisible to callers).
  */
 
 const MACHINE_ID_PREFIX = 'SP-';
@@ -28,12 +31,12 @@ export function formatMachineId(sequence) {
 /**
  * Parse a machine ID leniently and return its canonical form.
  *
- * Leniency is intentional: an ID may be typed by hand, OCR'd from a sticker or
- * pulled from a QR. "sp-1", "SP-001" and " sp-1 " all denote the same machine
- * and must resolve to it. The *stored* form is always canonical (3+ digits),
- * so parsing never invents a new identity — it only normalises.
+ * An ID may be typed by hand, read off a sticker, or arrive from a QR scan.
+ * "sp-1", "SP-001" and " sp-1 " all denote the same machine and must resolve
+ * to it. Storage is always canonical, so parsing normalises rather than
+ * inventing a new identity.
  *
- * Rejects: wrong prefix, non-numeric suffix, more than 6 digits, separators.
+ * Rejects: wrong prefix, non-numeric suffix, more than 6 digits, sequence 0.
  */
 export function parseMachineId(machineId) {
   const match = /^SP-(\d{1,6})$/i.exec(String(machineId ?? '').trim());
@@ -52,67 +55,89 @@ export function buildQrPath(machineId) {
 }
 
 /**
- * Resolve the next free sequence number.
- * Reads only the numeric suffix of the highest existing ID.
+ * Build the customer-facing QR URL.
+ *
+ * The path is derived from the machine id so the QR can never point somewhere
+ * else. The token, when present, is what actually authorises the scan — it can
+ * be rotated without reprinting the machine id.
  */
-export async function peekNextSequence() {
-  const last = await Machine.findOne({ machineId: /^SP-\d+$/ })
-    .sort({ machineId: -1 })
-    .select('machineId')
-    .lean();
-
-  if (!last?.machineId) return 1;
-  const parsed = parseMachineId(last.machineId);
-  return parsed ? parsed.sequence + 1 : 1;
+export function buildQrUrl(machineId, { origin = null, token = null } = {}) {
+  const base = origin ? String(origin).replace(/\/+$/, '') : '';
+  const path = buildQrPath(machineId);
+  return `${base}${path}${token ? `?t=${token}` : ''}`;
 }
 
-/**
- * Allocate an unused machine ID. Retries on duplicate-key races.
- */
+/** A QR token: unguessable, revocable, never the machine id itself. */
+export function generateQrToken() {
+  return randomUUID().replace(/-/g, '');
+}
+
+/** Next free sequence number. */
+export async function peekNextSequence() {
+  const repo = getRepository();
+  const machines = await repo.findAll('machines', {});
+  const highest = machines.reduce((max, machine) => {
+    const parsed = parseMachineId(machine.machineId);
+    return parsed && parsed.sequence > max ? parsed.sequence : max;
+  }, 0);
+  return highest + 1;
+}
+
 export async function allocateMachineId() {
+  const repo = getRepository();
+
   for (let attempt = 0; attempt < MAX_ALLOCATION_ATTEMPTS; attempt += 1) {
-    const sequence = (await peekNextSequence()) + attempt;
-    const candidate = formatMachineId(sequence);
-    // eslint-disable-next-line no-await-in-loop
-    const exists = await Machine.exists({ machineId: candidate });
-    if (!exists) return candidate;
+    const candidate = formatMachineId((await peekNextSequence()) + attempt);
+    const taken = await repo.findOne('machines', { machineId: candidate });
+    if (!taken) return candidate;
   }
-  throw ApiError.serviceUnavailable('Could not allocate a unique machine ID. Please retry.', {
-    code: 'MACHINE_ID_EXHAUSTED',
+
+  throw ApiError.internal('Could not allocate a unique machine ID', {
+    code: 'MACHINE_ID_ALLOCATION_FAILED',
   });
 }
 
 /**
- * Create a machine bound to a shop. The caller must have already authorised
- * the admin action; ownership checks happen at the route layer.
+ * Register a machine for a shop.
+ *
+ * Server-owned fields: `machineId`, `qrPath`, `qrToken`, `status`, `agentStatus`.
+ * A client cannot set them — attempting to does nothing, because they are
+ * overwritten here. That is what stops a caller pre-claiming an ID or pointing
+ * a QR at someone else's machine.
  */
-export async function registerMachine({
-  shopId,
-  name,
-  printer = {},
-  pricing = {},
-  adminUserId = null,
-}) {
-  const shop = await Shop.findById(shopId).select('_id name status');
-  if (!shop) {
-    throw ApiError.notFound('Shop not found', { code: 'SHOP_NOT_FOUND' });
-  }
+export async function registerMachine({ shopId, name, printer = {}, pricing = {} }) {
+  const repo = getRepository();
+
+  const shop = await repo.findById('shops', shopId);
+  if (!shop) throw ApiError.notFound('Shop not found', { code: 'SHOP_NOT_FOUND' });
   if (shop.status === 'closed') {
     throw ApiError.conflict('Cannot register a machine for a closed shop', {
       code: 'SHOP_CLOSED',
     });
   }
 
-  const machineId = await allocateMachineId();
+  if (shop.machineCount !== undefined && shop.maxMachines !== undefined) {
+    if (shop.machineCount >= shop.maxMachines) {
+      throw ApiError.conflict('This shop has reached its machine limit for its plan', {
+        code: 'MACHINE_LIMIT_REACHED',
+        details: { limit: shop.maxMachines, plan: shop.planId },
+      });
+    }
+  }
 
+  const machineId = await allocateMachineId();
   const supportsColor = Boolean(printer.supportsColor);
-  const machine = await Machine.create({
+
+  const machine = await repo.insert('machines', {
     machineId,
-    shopId: shop._id,
+    shopId: shop.id,
     shopName: shop.name,
     name: name || 'Main counter',
     qrPath: buildQrPath(machineId),
+    qrToken: generateQrToken(),
+    qrTokenVersion: 1,
     status: 'offline',
+    agentStatus: 'unpaired',
     printer: {
       model: printer.model ?? null,
       supportsColor,
@@ -122,23 +147,34 @@ export async function registerMachine({
       connection: printer.connection ?? 'USB',
     },
     pricing: {
-      ...pricing,
-      // A mono printer cannot price colour jobs; force those rates to zero so a
-      // stray colour request can never be quoted.
-      ...(supportsColor ? {} : { colorSinglePaise: 0, colorDoublePaise: 0 }),
+      bwSinglePaise: pricing.bwSinglePaise ?? 200,
+      bwDoublePaise: pricing.bwDoublePaise ?? 300,
+      // A mono printer cannot price colour; zero the rate so a stray colour
+      // request cannot be quoted at all.
+      colorSinglePaise: supportsColor ? (pricing.colorSinglePaise ?? 800) : 0,
+      colorDoublePaise: supportsColor ? (pricing.colorDoublePaise ?? 1400) : 0,
+      a3SurchargeBps: pricing.a3SurchargeBps ?? 16_000,
+      minimumChargePaise: pricing.minimumChargePaise ?? 500,
     },
-    registeredBy: adminUserId,
+    consumables: { paperPercent: 100, tonerPercent: 100 },
+    jobsToday: 0,
+    totalJobs: 0,
+    lastHeartbeatAt: null,
+    registeredAt: new Date().toISOString(),
   });
 
-  // Keep the denormalised counter accurate on the shop record.
-  await Shop.updateOne({ _id: shop._id }, { $inc: { machineCount: 1 } });
+  await repo.increment('shops', shop.id, { machineCount: 1 });
 
   return machine;
 }
 
 /**
- * Public QR lookup: resolve a scanned machine ID to the machine plus the
- * minimum shop context the customer portal needs.
+ * Resolve a machine for the public QR portal.
+ *
+ * Returns the machine with its shop embedded, because the portal needs opening
+ * hours, address and whether the shop is taking orders. Deliberately does *not*
+ * return pricing internals the customer does not need, agent details, or any
+ * other machine on the shop.
  */
 export async function findMachineForCustomer(machineId) {
   const parsed = parseMachineId(machineId);
@@ -148,12 +184,8 @@ export async function findMachineForCustomer(machineId) {
     });
   }
 
-  const machine = await Machine.findOne({ machineId: parsed.normalised })
-    .populate(
-      'shopId',
-      'name shopCode address phone openHours settings status planStatus rating reviewCount',
-    )
-    .lean();
+  const repo = getRepository();
+  const machine = await repo.findOne('machines', { machineId: parsed.normalised });
 
   if (!machine) {
     throw ApiError.notFound(`Machine ${parsed.normalised} is not registered`, {
@@ -161,33 +193,92 @@ export async function findMachineForCustomer(machineId) {
     });
   }
 
-  return machine;
+  const shop = await repo.findById('shops', machine.shopId);
+
+  return {
+    ...machine,
+    shopId: shop ?? null,
+    // Kept for callers written against the Phase 2 shape.
+    shop,
+  };
 }
 
 /**
- * Guard used before an order may be created. Returns a reason when the machine
- * cannot accept jobs, so the portal can explain why rather than silently
- * disabling the button.
+ * Why this machine cannot take an order right now, or null if it can.
+ *
+ * A single function so the customer portal, the order service and the admin
+ * dashboard cannot disagree about whether a machine is available.
  */
-export function getAcceptanceBlocker(machine) {
-  const shop = machine.shopId;
+export function getAcceptanceBlocker(machine, shop = null) {
+  if (!machine) return 'This machine is not available.';
   if (machine.status === 'offline') return 'This machine is currently offline.';
   if (machine.status === 'maintenance') return 'This machine is under maintenance.';
-  if (shop && shop.status !== 'active') return 'This shop is not accepting orders right now.';
-  if (shop && shop.settings?.acceptOrders === false) return 'This shop has paused new orders.';
-  if (shop && shop.planStatus === 'cancelled')
-    return 'This shop is not accepting orders right now.';
+
+  const resolvedShop =
+    shop ?? (machine.shopId && typeof machine.shopId === 'object' ? machine.shopId : null);
+  if (resolvedShop) {
+    if (resolvedShop.status && resolvedShop.status !== 'active') {
+      return 'This shop is not accepting orders right now.';
+    }
+    if (resolvedShop.settings?.acceptOrders === false) return 'This shop has paused new orders.';
+    if (resolvedShop.planStatus === 'cancelled')
+      return 'This shop is not accepting orders right now.';
+  }
   return null;
+}
+
+/**
+ * Rotate a machine's QR token.
+ *
+ * Invalidates the previously printed QR. Intended for a lost or photographed
+ * sticker; the machine id itself never changes, so order history stays intact.
+ */
+export async function rotateQrToken({ machineId, shopId, actorId = null }) {
+  const repo = getRepository();
+  const machine = await repo.findOne('machines', { machineId, shopId });
+  if (!machine) throw ApiError.notFound('Machine not found', { code: 'MACHINE_NOT_FOUND' });
+
+  const updated = await repo.updateById('machines', machine.id, {
+    qrToken: generateQrToken(),
+    qrTokenVersion: (machine.qrTokenVersion ?? 1) + 1,
+    qrRotatedAt: new Date().toISOString(),
+    qrRotatedBy: actorId,
+  });
+
+  return updated;
+}
+
+/** Public projection of a machine for shop dashboards. */
+export function publicMachine(machine) {
+  if (!machine) return null;
+  return {
+    id: machine.id,
+    machineId: machine.machineId,
+    shopId: machine.shopId,
+    name: machine.name,
+    status: machine.status,
+    agentStatus: machine.agentStatus,
+    qrPath: machine.qrPath,
+    printer: machine.printer,
+    pricing: machine.pricing,
+    consumables: machine.consumables,
+    jobsToday: machine.jobsToday ?? 0,
+    totalJobs: machine.totalJobs ?? 0,
+    lastHeartbeatAt: machine.lastHeartbeatAt ?? null,
+    registeredAt: machine.registeredAt ?? machine.createdAt,
+  };
 }
 
 export default {
   allocateMachineId,
   buildQrPath,
+  buildQrUrl,
   findMachineForCustomer,
   formatMachineId,
+  generateQrToken,
   getAcceptanceBlocker,
-  isValidMachineId,
   parseMachineId,
-  peekNextSequence,
+  publicMachine,
   registerMachine,
+  rotateQrToken,
 };

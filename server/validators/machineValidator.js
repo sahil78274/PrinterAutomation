@@ -14,10 +14,11 @@ export function validateRegisterMachine(body = {}) {
   const errors = {};
   const value = {};
 
-  const shopId = cleanString(body.shopId, 24);
-  if (!shopId) errors.shopId = 'Shop is required';
-  else if (!isObjectId(shopId)) errors.shopId = 'Shop ID is invalid';
-  value.shopId = shopId;
+  // shopId is intentionally NOT required here. The owning shop is derived from
+  // the caller's token by resolveShopScope, which is both safer (a body field
+  // cannot redirect the machine to another shop) and adapter-agnostic: ids are
+  // opaque strings, so an ObjectId-only format check would be wrong.
+  value.shopId = cleanString(body.shopId, 64);
 
   value.name = requireString(errors, 'name', body.name, { max: 80 });
 
@@ -88,3 +89,55 @@ export function validateMachineIdParam(params = {}) {
 }
 
 export { PAPER_SIZES };
+
+/** Validate a machine status change. */
+export function validateMachineStatus(body = {}) {
+  const errors = {};
+  const allowed = ['online', 'offline', 'maintenance'];
+  const status = String(body.status ?? '').trim();
+  if (!status) errors.status = 'Status is required';
+  else if (!allowed.includes(status)) {
+    errors.status = `Status must be one of: ${allowed.join(', ')}`;
+  }
+  return { value: { status }, errors };
+}
+
+/**
+ * Validate a pricing update.
+ *
+ * Only whole paise, non-negative, bounded. A negative or fractional price is
+ * rejected here rather than producing a nonsensical invoice later.
+ */
+export function validateMachinePricing(body = {}) {
+  const errors = {};
+  const value = {};
+
+  const fields = [
+    'bwSinglePaise',
+    'bwDoublePaise',
+    'colorSinglePaise',
+    'colorDoublePaise',
+    'minimumChargePaise',
+    'a3SurchargeBps',
+  ];
+
+  let provided = 0;
+  for (const field of fields) {
+    if (body[field] === undefined) continue;
+    provided += 1;
+
+    const max = field === 'a3SurchargeBps' ? 50_000 : 100_000;
+    const min = field === 'a3SurchargeBps' ? 10_000 : 0;
+    const number = Number(body[field]);
+
+    if (!Number.isInteger(number) || number < min || number > max) {
+      errors[field] = `Must be a whole number between ${min} and ${max}`;
+    } else {
+      value[field] = number;
+    }
+  }
+
+  if (!provided) errors.pricing = 'Provide at least one price to update';
+
+  return { value, errors };
+}

@@ -87,14 +87,37 @@ describe('invalid routes', () => {
     assert.equal(res.body.error.code, 'ROUTE_NOT_FOUND');
   });
 
-  test('reserved namespaces return an explanatory 404, not a stack trace', async () => {
-    for (const path of ['/api/orders', '/api/auth/login', '/api/agents/heartbeat']) {
+  test('every documented namespace is mounted, none is a placeholder', async () => {
+    // The build has no reserved namespaces left. Each of these must reach a real
+    // router: 401/400/422 are all fine — a 404 NOT_IMPLEMENTED is not.
+    const paths = [
+      '/api/auth/login',
+      '/api/orders',
+      '/api/documents',
+      '/api/agents/heartbeat',
+      '/api/analytics/shop',
+      '/api/staff',
+      '/api/subscriptions/plans',
+      '/api/print-jobs',
+      '/api/admin/users',
+      '/api/payments/provider',
+      '/api/machines',
+      '/api/shops',
+    ];
+
+    for (const path of paths) {
       // eslint-disable-next-line no-await-in-loop
       const res = await request(harness.baseUrl, path);
-      assert.equal(res.status, 404, `${path} should be 404`);
-      assert.equal(res.body.error.code, 'NOT_IMPLEMENTED');
-      assert.match(res.body.error.message, /Phase \d/);
+      assert.notEqual(res.body?.error?.code, 'NOT_IMPLEMENTED', `${path} is still a placeholder`);
+      assert.ok(res.status < 500, `${path} returned ${res.status}`);
     }
+  });
+
+  test('an unknown namespace is a plain 404, not a reserved-namespace message', async () => {
+    const res = await request(harness.baseUrl, '/api/nonexistent-module');
+    assert.equal(res.status, 404);
+    assert.equal(res.body.success, false);
+    assert.equal(typeof res.body.error.code, 'string');
   });
 
   test('404 responses carry security headers', async () => {
@@ -105,7 +128,7 @@ describe('invalid routes', () => {
 });
 
 describe('machine routes', () => {
-  test('rejects a malformed machine ID with 422 before touching the database', async () => {
+  test('rejects a malformed machine ID with 422 before touching the repository', async () => {
     const res = await request(harness.baseUrl, '/api/machines/SP-ABC');
     assert.equal(res.status, 422);
     assert.equal(res.body.error.code, 'VALIDATION_ERROR');
@@ -119,34 +142,35 @@ describe('machine routes', () => {
     assert.equal(res.status, 422);
   });
 
-  test('accepts a well-formed ID and fails with 503 while the database is down', async () => {
-    const res = await request(harness.baseUrl, '/api/machines/SP-001');
-    assert.equal(res.status, 503);
-    assert.equal(res.body.error.code, 'DATABASE_UNAVAILABLE');
+  test('resolves a well-formed but unknown machine as a clean 404', async () => {
+    const res = await request(harness.baseUrl, '/api/machines/SP-999');
+    assert.equal(res.status, 404);
+    assert.equal(res.body.error.code, 'MACHINE_NOT_FOUND');
   });
 
   test('listing without shopId is rejected rather than dumping all tenants', async () => {
     const res = await request(harness.baseUrl, '/api/machines');
-    // Without a DB this is 503; with a DB it must be a 400. Either way it must
-    // never return a cross-tenant list.
-    assert.ok([400, 503].includes(res.status));
-    if (res.status === 400) assert.equal(res.body.error.code, 'SHOP_ID_REQUIRED');
+    // Unauthenticated, so the listing must not disclose anything: 401 first.
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'AUTH_REQUIRED');
   });
 
-  test('machine registration is closed while authentication is pending', async () => {
+  test('machine registration requires a session, not an admin flag', async () => {
     const res = await request(harness.baseUrl, '/api/machines', {
       method: 'POST',
-      body: { shopId: '507f1f77bcf86cd799439011', name: 'Test' },
+      body: { name: 'Test' },
     });
-    // devOnlyAdmin returns 404 (not 403) so the endpoint is not advertised.
-    assert.equal(res.status, 404);
+    // The Phase 2 devOnlyAdmin guard is gone; real authentication replaced it.
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'AUTH_REQUIRED');
   });
 });
 
 describe('shop routes', () => {
-  test('shop listing is closed while authentication is pending', async () => {
+  test('shop listing requires a session', async () => {
     const res = await request(harness.baseUrl, '/api/shops');
-    assert.equal(res.status, 404);
+    assert.equal(res.status, 401);
+    assert.equal(res.body.error.code, 'AUTH_REQUIRED');
   });
 });
 
@@ -157,8 +181,8 @@ describe('request parsing', () => {
       body: '{"shopId": ',
       headers: { 'Content-Type': 'application/json', 'X-Request-Id': 'json-test-12345' },
     });
-    // The admin guard runs first for POST /api/machines, so this returns 404.
-    // Assert the important property: never a 500.
+    // Authentication runs first for POST /api/machines, so the JSON never
+    // reaches a handler. Assert the important property: never a 500.
     assert.ok(res.status < 500, `expected < 500, got ${res.status}`);
   });
 });
@@ -186,5 +210,49 @@ describe('CORS', () => {
     assert.equal(res.status, 204);
     assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:5173');
     assert.match(res.headers.get('access-control-allow-methods'), /POST/);
+  });
+
+  test('allows the 127.0.0.1 spelling of the same dev origin', async () => {
+    // A browser treats these as different origins, and Vite binds 0.0.0.0 so
+    // either can be used to open the app. Allowing only "localhost" produced
+    // CORS failures that looked like a backend outage.
+    const res = await request(harness.baseUrl, '/api/health', {
+      headers: { Origin: 'http://127.0.0.1:5173' },
+    });
+    assert.equal(res.headers.get('access-control-allow-origin'), 'http://127.0.0.1:5173');
+  });
+
+  test('the loopback alias does not widen the allowlist to other ports', async () => {
+    for (const origin of ['http://127.0.0.1:6000', 'http://localhost:6000']) {
+      const res = await request(harness.baseUrl, '/api/health', { headers: { Origin: origin } });
+      assert.equal(res.headers.get('access-control-allow-origin'), null, origin);
+    }
+  });
+
+  test('the loopback alias does not allow a lookalike hostname', async () => {
+    for (const origin of ['http://localhost.evil.example:5173', 'http://127.0.0.1.nip.io:5173']) {
+      const res = await request(harness.baseUrl, '/api/health', { headers: { Origin: origin } });
+      assert.equal(res.headers.get('access-control-allow-origin'), null, origin);
+    }
+  });
+
+  test('rejects the https upgrade of a configured http origin', async () => {
+    // Scheme is part of the origin and must match exactly.
+    const res = await request(harness.baseUrl, '/api/health', {
+      headers: { Origin: 'https://localhost:5173' },
+    });
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+  });
+
+  test('preflight from the alias origin succeeds', async () => {
+    const res = await fetch(`${harness.baseUrl}/api/health`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://127.0.0.1:5173',
+        'Access-Control-Request-Method': 'GET',
+      },
+    });
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get('access-control-allow-origin'), 'http://127.0.0.1:5173');
   });
 });

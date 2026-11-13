@@ -32,17 +32,21 @@ function notFound(message) {
 /* ----------------------------------------------------------- live switch --- */
 
 /**
- * Live mode is opt-in.
+ * Live mode for the *business* endpoints — opt-in, and separate from the health
+ * check on purpose.
  *
- * An *empty* VITE_API_BASE_URL does not mean "no backend" — it means
- * "same origin", which is the normal setup for both the Vite dev proxy and a
- * production reverse proxy (see apiClient.resolveBaseUrl). So the switch is
- * "the variable was set at all", not "the variable is truthy". Testing for
- * truthiness meant the documented `VITE_API_BASE_URL=` configuration silently
- * left every call on mock data with no way to notice.
+ * The health check always talks to the real server; that is its whole job. The
+ * screens are different: the backend currently implements only health, machines
+ * and shops, and its admin routes answer 404 without authentication. Letting
+ * every page go live just because a dev server is reachable would replace
+ * working demo screens with error states, so business calls stay on mock data
+ * until the corresponding endpoints exist and are authenticated.
+ *
+ * Enable explicitly with `VITE_API_LIVE_DATA=true` once those routes are ready.
+ * An *empty* VITE_API_BASE_URL still means "same origin" rather than "no
+ * backend" — see apiClient.resolveBaseUrl.
  */
-const rawBaseUrl = import.meta.env?.VITE_API_BASE_URL;
-export const isLiveMode = rawBaseUrl !== undefined && rawBaseUrl !== null;
+export const isLiveMode = import.meta.env?.VITE_API_LIVE_DATA === 'true';
 
 /**
  * Endpoints with a real, implemented server counterpart.
@@ -52,11 +56,25 @@ export const isLiveMode = rawBaseUrl !== undefined && rawBaseUrl !== null;
  * only once the route exists and is tested on the server.
  */
 const LIVE_ENDPOINTS = new Set([
+  // auth
+  'login',
+  'me',
+  // shops and machines
   'getShops',
   'getShop',
   'getMachines',
   'getMachine',
   'createMachine',
+  'updateMachinePricing',
+  // orders and documents
+  'getOrders',
+  'getOrder',
+  'createOrder',
+  // analytics
+  'getShopAnalytics',
+  'getPlatformAnalytics',
+  'getInvoices',
+  'changePlan',
 ]);
 
 function hasLive(name) {
@@ -102,36 +120,67 @@ async function withLive(name, liveFn, mockFn) {
 
 // POST /api/auth/login
 export async function login({ email, password }) {
-  await delay(560);
-  const account = DEMO_ACCOUNTS.find(
-    (a) => a.email.toLowerCase() === String(email).toLowerCase().trim(),
-  );
-  if (!account) throw new Error('No account found for that email address.');
-  if (account.password !== password) throw new Error('Incorrect password. Please try again.');
+  return withLive(
+    'login',
+    async () => {
+      const data = await apiClient.post('/api/auth/login', { email, password }, { auth: false });
 
-  const shop = account.shopId ? db.shops.find((s) => s.id === account.shopId) : null;
-  return {
-    token: `mock_jwt_${account.role}_${Date.now()}`,
-    user: {
-      id: account.id,
-      role: account.role,
-      name: account.name,
-      email: account.email,
-      title: account.title,
-      shopId: account.shopId,
-      shopName: account.shopName,
-      shop: shop ?? null,
+      // The API returns flat user fields plus the token; the UI expects the
+      // user's shop embedded so the header can render without a second call.
+      const user = data.user ?? {};
+      return {
+        token: data.accessToken,
+        refreshToken: data.refreshToken ?? null,
+        user: {
+          ...user,
+          shopName: user.shopName ?? user.shop?.name ?? null,
+          shop: user.shop ?? null,
+        },
+      };
     },
-  };
+    async () => {
+      await delay(560);
+      const account = DEMO_ACCOUNTS.find(
+        (a) => a.email.toLowerCase() === String(email).toLowerCase().trim(),
+      );
+      if (!account) throw new Error('No account found for that email address.');
+      if (account.password !== password) throw new Error('Incorrect password. Please try again.');
+
+      const shop = account.shopId ? db.shops.find((s) => s.id === account.shopId) : null;
+      return {
+        token: `mock_jwt_${account.role}_${Date.now()}`,
+        user: {
+          id: account.id,
+          role: account.role,
+          name: account.name,
+          email: account.email,
+          title: account.title,
+          shopId: account.shopId,
+          shopName: account.shopName,
+          shop: shop ?? null,
+        },
+      };
+    },
+  );
 }
 
 // GET /api/auth/me
 export async function me(token) {
-  await delay(200);
-  if (!token) throw new Error('Unauthenticated');
-  const role = token.split('_')[2];
-  const account = DEMO_ACCOUNTS.find((a) => a.role === role);
-  return account ? { role: account.role, name: account.name } : null;
+  return withLive(
+    'me',
+    async () => {
+      // The client attaches the bearer token from storage itself; `token` is
+      // accepted here so callers can pass it through unchanged.
+      return apiClient.get('/api/auth/me');
+    },
+    async () => {
+      await delay(200);
+      if (!token) throw new Error('Unauthenticated');
+      const role = token.split('_')[2];
+      const account = DEMO_ACCOUNTS.find((a) => a.role === role);
+      return account ? { role: account.role, name: account.name } : null;
+    },
+  );
 }
 
 /* ----------------------------------------------------------------- shops --- */
@@ -383,14 +432,58 @@ export async function sendAgentCommand(machineId, command) {
 
 // GET /api/orders?shopId=&machineId=&status=&limit=
 export async function getOrders({ shopId, machineId, status, limit } = {}) {
-  await delay(340);
-  let list = [...db.orders];
-  if (shopId) list = list.filter((o) => o.shopId === shopId);
-  if (machineId) list = list.filter((o) => o.machineId === machineId);
-  if (status) list = list.filter((o) => o.status === status);
-  list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  if (limit) list = list.slice(0, limit);
-  return list.map((o) => ({ ...o }));
+  return withLive(
+    'getOrders',
+    async () => {
+      // The API scopes the listing to the caller's own shop and ignores shopId
+      // for non-admins, so tenancy is enforced server-side regardless.
+      const orders = await apiClient.get('/api/orders', {
+        query: { shopId, machineId, status, limit },
+      });
+      return orders.map(adaptOrder);
+    },
+    async () => {
+      await delay(340);
+      let list = [...db.orders];
+      if (shopId) list = list.filter((o) => o.shopId === shopId);
+      if (machineId) list = list.filter((o) => o.machineId === machineId);
+      if (status) list = list.filter((o) => o.status === status);
+      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      if (limit) list = list.slice(0, limit);
+      return list.map((o) => ({ ...o }));
+    },
+  );
+}
+
+/**
+ * Adapt an API order to the shape the dashboards already render.
+ *
+ * The UI was built against the mock's shape (`amount` in rupees, `documents[]`),
+ * and the API speaks integer paise. Converting here — once, at the boundary —
+ * keeps every component unchanged and keeps money arithmetic in paise.
+ */
+function adaptOrder(order) {
+  if (!order) return null;
+  const totalPaise = order.totals?.totalPaise ?? 0;
+  return {
+    ...order,
+    amount: Math.round(totalPaise) / 100,
+    subtotal: (order.totals?.subtotalPaise ?? 0) / 100,
+    platformFee: (order.totals?.platformFeePaise ?? 0) / 100,
+    documents:
+      order.documents ??
+      (order.documentName
+        ? [
+            {
+              id: order.documentId,
+              name: order.documentName,
+              pageCount: order.pageCount,
+            },
+          ]
+        : []),
+    // Surfaced so a simulated payment can never be rendered as real revenue.
+    simulated: order.simulated === true,
+  };
 }
 
 // GET /api/orders/:id
@@ -456,7 +549,67 @@ export async function refundOrder(orderId) {
 /* -------------------------------------------------------------- analytics --- */
 
 // GET /api/analytics/shop/:shopId
-export async function getShopAnalytics(shopId) {
+export async function getShopAnalytics(shopId, { days = 14 } = {}) {
+  return withLive(
+    'getShopAnalytics',
+    async () => adaptAnalytics(await apiClient.get('/api/analytics/shop', { query: { days } })),
+    () => getShopAnalytics_mock(shopId),
+  );
+}
+
+/**
+ * Map the API's analytics onto the dashboard's existing expectations.
+ *
+ * The API reports integer paise and a 0-100 progress band; the dashboard wants
+ * rupees, a `series` for the chart and a status breakdown. Deriving those here
+ * rather than in a dozen components means a shape change is one edit.
+ */
+function adaptAnalytics(data) {
+  if (!data) return null;
+
+  const statusBreakdown = Object.entries(data.ordersByStatus ?? {}).map(([status, count]) => ({
+    status,
+    count,
+  }));
+
+  // The API already zero-fills its daily series.
+  const series = (data.daily ?? []).map((day) => ({
+    date: day.date,
+    label: new Date(day.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
+    orders: day.orders,
+    revenue: day.revenuePaise / 100,
+  }));
+
+  const today = series.at(-1) ?? { orders: 0, revenue: 0 };
+  const last7 = series.slice(-7);
+  const sum = (rows, key) => rows.reduce((total, row) => total + row[key], 0);
+
+  return {
+    // API-computed totals, not re-derived from the series.
+    totalOrders: data.volume?.orders ?? 0,
+    todayOrders: today.orders,
+    todayRevenue: today.revenue,
+    todayPages: data.volume?.pages ?? 0,
+    weekOrders: sum(last7, 'orders'),
+    weekRevenue: sum(last7, 'revenue'),
+    monthRevenue: data.revenue?.grossPaise ? data.revenue.grossPaise / 100 : 0,
+    // Jobs still in flight: everything not finished and not cancelled.
+    pendingJobs: Object.entries(data.jobsByStatus ?? {})
+      .filter(([status]) => !['COMPLETED', 'CANCELLED'].includes(status))
+      .reduce((total, [, count]) => total + count, 0),
+    series,
+    statusBreakdown,
+    // Real figures from the backend, so the cards are never hardcoded.
+    sheetsPrinted: data.volume?.sheets ?? 0,
+    successRate: data.printing?.successRatePercent ?? null,
+    // Every figure in live mode comes from simulated payments; say so.
+    simulated: data.simulated === true,
+    topDocuments: [],
+  };
+}
+
+/** Mock implementation — see the live wiring above. */
+async function getShopAnalytics_mock(shopId) {
   await delay(400);
   const orders = db.orders.filter((o) => o.shopId === shopId);
   const paid = orders.filter((o) => o.paymentStatus === 'success' || o.simulated);
@@ -560,23 +713,58 @@ export async function getPlatformAnalytics() {
 
 // PATCH /api/shops/:id/plan
 export async function changePlan(shopId, planId) {
-  await delay(650);
-  const shop = db.shops.find((s) => s.id === shopId);
-  if (!shop) throw notFound('Shop not found');
-  shop.planId = planId;
-  shop.planStatus = 'active';
-  emitChange();
-  return { ...shop };
+  return withLive(
+    'changePlan',
+    async () => {
+      const subscription = await apiClient.post('/api/subscriptions/plan', { planId });
+      return {
+        id: shopId,
+        planId: subscription.planId,
+        planStatus: subscription.status,
+        // Flags that the plan change was recorded against simulated billing.
+        simulated: subscription.simulated === true,
+      };
+    },
+    async () => {
+      await delay(650);
+      const shop = db.shops.find((s) => s.id === shopId);
+      if (!shop) throw notFound('Shop not found');
+      shop.planId = planId;
+      shop.planStatus = 'active';
+      emitChange();
+      return { ...shop };
+    },
+  );
 }
 
 // GET /api/subscription/invoices?shopId=
 export async function getInvoices(shopId) {
-  await delay(240);
-  const shop = db.shops.find((s) => s.id === shopId);
-  return db.invoices.map((inv) => ({
-    ...inv,
-    plan: shop?.planId === 'scale' ? 'Scale' : shop?.planId === 'starter' ? 'Starter' : inv.plan,
-  }));
+  return withLive(
+    'getInvoices',
+    async () => {
+      const subscription = await apiClient.get('/api/subscriptions/current');
+      return (subscription.invoices ?? []).map((invoice) => ({
+        id: invoice.id,
+        number: invoice.invoiceNumber,
+        amount: invoice.amountPaise / 100,
+        status: invoice.status,
+        issuedAt: invoice.periodStart,
+        periodStart: invoice.periodStart,
+        periodEnd: invoice.periodEnd,
+        plan: subscription.planName,
+        simulated: true,
+      }));
+    },
+    async () => {
+      await delay(240);
+      const shop = db.shops.find((s) => s.id === shopId);
+      return db.invoices.map((inv) => ({
+        ...inv,
+        plan:
+          shop?.planId === 'scale' ? 'Scale' : shop?.planId === 'starter' ? 'Starter' : inv.plan,
+      }));
+    },
+  );
 }
 
 /* -------------------------------------------------------------- payments --- */
