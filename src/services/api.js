@@ -31,8 +31,18 @@ function notFound(message) {
 
 /* ----------------------------------------------------------- live switch --- */
 
-/** Live mode is opt-in: no base URL means the whole app runs on the mock. */
-export const isLiveMode = Boolean(import.meta.env?.VITE_API_BASE_URL);
+/**
+ * Live mode is opt-in.
+ *
+ * An *empty* VITE_API_BASE_URL does not mean "no backend" — it means
+ * "same origin", which is the normal setup for both the Vite dev proxy and a
+ * production reverse proxy (see apiClient.resolveBaseUrl). So the switch is
+ * "the variable was set at all", not "the variable is truthy". Testing for
+ * truthiness meant the documented `VITE_API_BASE_URL=` configuration silently
+ * left every call on mock data with no way to notice.
+ */
+const rawBaseUrl = import.meta.env?.VITE_API_BASE_URL;
+export const isLiveMode = rawBaseUrl !== undefined && rawBaseUrl !== null;
 
 /**
  * Endpoints with a real, implemented server counterpart.
@@ -51,6 +61,18 @@ const LIVE_ENDPOINTS = new Set([
 
 function hasLive(name) {
   return isLiveMode && LIVE_ENDPOINTS.has(name);
+}
+
+/**
+ * Unconditional real request — no mock fallback, ever.
+ *
+ * Every other function in this file degrades to sample data when the backend is
+ * unreachable, which is right for demo screens but wrong for a diagnostic: it
+ * would report success while the server is down. This one is only used by the
+ * development-only connection indicator, so it must fail loudly.
+ */
+export async function checkBackendHealth({ timeoutMs = 4000 } = {}) {
+  return apiClient.get('/api/health', { timeoutMs, auth: false });
 }
 
 /**

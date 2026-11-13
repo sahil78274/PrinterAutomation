@@ -52,12 +52,15 @@ async function apiIsUp() {
 // A Vite server in middleware mode gives us `import.meta.env` exactly as the
 // real bundle sees it, so the live switch is tested through the same code path.
 async function loadServices(apiBaseUrl) {
+  // `undefined` simulates the variable being absent entirely (mock mode).
+  // An empty string is a *real* configuration meaning "same origin".
   const server = await createServer({
     server: { middlewareMode: true },
     appType: 'custom',
     logLevel: 'error',
     define: {
-      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl),
+      'import.meta.env.VITE_API_BASE_URL':
+        apiBaseUrl === undefined ? 'undefined' : JSON.stringify(apiBaseUrl),
     },
   });
 
@@ -71,9 +74,9 @@ console.log(`\nLive-API wiring test (API at ${API_ORIGIN}: ${up ? 'up' : 'down'}
 
 /* -------------------------------------------------------------- mock mode --- */
 
-console.log('Mock mode (no VITE_API_BASE_URL)');
+console.log('Mock mode (VITE_API_BASE_URL not defined)');
 {
-  const { server, api, client } = await loadServices('');
+  const { server, api, client } = await loadServices(undefined);
   try {
     check('isLiveMode is false', api.isLiveMode === false);
     check('base URL resolves to same origin', client.resolveBaseUrl() === '');
@@ -146,11 +149,26 @@ console.log('\nFallback (live mode, unreachable server)');
   }
 }
 
+/* ------------------------------------------------- live mode, same origin --- */
+
+console.log('\nLive mode with an empty base URL (same origin)');
+{
+  const { server, api, client } = await loadServices('');
+  try {
+    // An empty value is how vite.config.js proxies /api to :5000, so it must
+    // mean "live", not "mock" — testing truthiness here was the original bug.
+    check('isLiveMode is true for an empty base URL', api.isLiveMode === true);
+    check('base URL resolves to same origin', client.resolveBaseUrl() === '');
+  } finally {
+    await server.close();
+  }
+}
+
 /* ---------------------------------------------------------------- timeout --- */
 
 console.log('\nError handling');
 {
-  const { server, client } = await loadServices('');
+  const { server, client } = await loadServices(undefined);
   try {
     // An unroutable address must produce a typed error, never a hang.
     const started = Date.now();
