@@ -46,6 +46,18 @@ const config = {
       .filter(Boolean),
     // True when the allowlist came from the dev fallback rather than config.
     isDefault: !process.env.CLIENT_URL,
+    /**
+     * Allow the loopback aliases in development.
+     *
+     * A browser treats http://localhost:5173 and http://127.0.0.1:5173 as two
+     * different origins, and Vite binds 0.0.0.0 so either can be used to open
+     * the app. Listing only "localhost" means half the normal dev URLs fail
+     * with a CORS error that looks like a backend outage.
+     *
+     * Development only, and only for loopback: production must name its
+     * origins explicitly.
+     */
+    allowLoopbackAliases: !isProduction,
   },
 
   mongo: {

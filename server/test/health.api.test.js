@@ -187,4 +187,48 @@ describe('CORS', () => {
     assert.equal(res.headers.get('access-control-allow-origin'), 'http://localhost:5173');
     assert.match(res.headers.get('access-control-allow-methods'), /POST/);
   });
+
+  test('allows the 127.0.0.1 spelling of the same dev origin', async () => {
+    // A browser treats these as different origins, and Vite binds 0.0.0.0 so
+    // either can be used to open the app. Allowing only "localhost" produced
+    // CORS failures that looked like a backend outage.
+    const res = await request(harness.baseUrl, '/api/health', {
+      headers: { Origin: 'http://127.0.0.1:5173' },
+    });
+    assert.equal(res.headers.get('access-control-allow-origin'), 'http://127.0.0.1:5173');
+  });
+
+  test('the loopback alias does not widen the allowlist to other ports', async () => {
+    for (const origin of ['http://127.0.0.1:6000', 'http://localhost:6000']) {
+      const res = await request(harness.baseUrl, '/api/health', { headers: { Origin: origin } });
+      assert.equal(res.headers.get('access-control-allow-origin'), null, origin);
+    }
+  });
+
+  test('the loopback alias does not allow a lookalike hostname', async () => {
+    for (const origin of ['http://localhost.evil.example:5173', 'http://127.0.0.1.nip.io:5173']) {
+      const res = await request(harness.baseUrl, '/api/health', { headers: { Origin: origin } });
+      assert.equal(res.headers.get('access-control-allow-origin'), null, origin);
+    }
+  });
+
+  test('rejects the https upgrade of a configured http origin', async () => {
+    // Scheme is part of the origin and must match exactly.
+    const res = await request(harness.baseUrl, '/api/health', {
+      headers: { Origin: 'https://localhost:5173' },
+    });
+    assert.equal(res.headers.get('access-control-allow-origin'), null);
+  });
+
+  test('preflight from the alias origin succeeds', async () => {
+    const res = await fetch(`${harness.baseUrl}/api/health`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://127.0.0.1:5173',
+        'Access-Control-Request-Method': 'GET',
+      },
+    });
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get('access-control-allow-origin'), 'http://127.0.0.1:5173');
+  });
 });

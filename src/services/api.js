@@ -32,17 +32,21 @@ function notFound(message) {
 /* ----------------------------------------------------------- live switch --- */
 
 /**
- * Live mode is opt-in.
+ * Live mode for the *business* endpoints — opt-in, and separate from the health
+ * check on purpose.
  *
- * An *empty* VITE_API_BASE_URL does not mean "no backend" — it means
- * "same origin", which is the normal setup for both the Vite dev proxy and a
- * production reverse proxy (see apiClient.resolveBaseUrl). So the switch is
- * "the variable was set at all", not "the variable is truthy". Testing for
- * truthiness meant the documented `VITE_API_BASE_URL=` configuration silently
- * left every call on mock data with no way to notice.
+ * The health check always talks to the real server; that is its whole job. The
+ * screens are different: the backend currently implements only health, machines
+ * and shops, and its admin routes answer 404 without authentication. Letting
+ * every page go live just because a dev server is reachable would replace
+ * working demo screens with error states, so business calls stay on mock data
+ * until the corresponding endpoints exist and are authenticated.
+ *
+ * Enable explicitly with `VITE_API_LIVE_DATA=true` once those routes are ready.
+ * An *empty* VITE_API_BASE_URL still means "same origin" rather than "no
+ * backend" — see apiClient.resolveBaseUrl.
  */
-const rawBaseUrl = import.meta.env?.VITE_API_BASE_URL;
-export const isLiveMode = rawBaseUrl !== undefined && rawBaseUrl !== null;
+export const isLiveMode = import.meta.env?.VITE_API_LIVE_DATA === 'true';
 
 /**
  * Endpoints with a real, implemented server counterpart.

@@ -10,6 +10,43 @@ import { apiLimiter } from './middleware/rateLimiters.js';
 import { sendSuccess } from './utils/apiResponse.js';
 
 /**
+ * Is this Origin allowed to read responses?
+ *
+ * Exact match against the configured allowlist, plus — in development only —
+ * the loopback aliases of an allowed host. A browser treats localhost and
+ * 127.0.0.1 as distinct origins, and Vite serves on both, so allowing just one
+ * spelling produces intermittent CORS failures that look like an API outage.
+ *
+ * The alias rule is deliberately narrow: same protocol, same port, and the host
+ * must be a loopback name we swapped. It cannot accidentally match a real
+ * domain, and production never enables it.
+ */
+const LOOPBACK_ALIASES = new Map([
+  ['localhost', '127.0.0.1'],
+  ['127.0.0.1', 'localhost'],
+]);
+
+function isAllowedOrigin(origin) {
+  if (config.cors.origins.includes(origin)) return true;
+  if (!config.cors.allowLoopbackAliases) return false;
+
+  let parsed;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+
+  const alias = LOOPBACK_ALIASES.get(parsed.hostname);
+  if (!alias) return false;
+
+  // Only compare against origins we already trust; the alias just re-spells
+  // the host, it does not widen the allowlist.
+  const aliased = `${parsed.protocol}//${alias}${parsed.port ? `:${parsed.port}` : ''}`;
+  return config.cors.origins.includes(aliased);
+}
+
+/**
  * Express application factory.
  *
  * Exported separately from server.js so tests can mount the app without opening
@@ -46,9 +83,11 @@ export function createApp() {
         // Same-origin, curl and server-to-server requests have no Origin header.
         if (!origin) return callback(null, true);
 
-        if (config.cors.origins.includes(origin)) return callback(null, true);
+        if (isAllowedOrigin(origin)) return callback(null, true);
 
         // Reject without throwing: CORS failures should not 500 the request.
+        // A browser then reports the blocked request clearly, instead of the
+        // request dying with a 500 and looking like a server bug.
         return callback(null, false);
       },
       credentials: true,

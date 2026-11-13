@@ -2,7 +2,7 @@
  * HTTP client for the SmartPrint API.
  *
  * Responsibilities, and deliberately nothing else:
- *  - resolve the base URL (explicit env → dev proxy → same origin)
+ *  - resolve the base URL (explicit env → localhost:5000 in dev → same origin)
  *  - attach the bearer token, if one exists
  *  - unwrap the `{ success, data }` envelope
  *  - normalise failures into a single `ApiClientError` shape the UI can render
@@ -18,14 +18,32 @@
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
+/** Default API origin used when VITE_API_BASE_URL is not configured. */
+export const DEV_API_BASE_URL = 'http://localhost:5000';
+
 /**
- * Empty base URL means "same origin", which is what the Vite dev proxy and a
- * production reverse proxy both want. Falling back to absolute localhost URLs
- * here would break every deployment behind a proxy.
+ * Resolve the API base URL.
+ *
+ * Resolution order:
+ *   1. `VITE_API_BASE_URL`, when explicitly set (may be empty — see below)
+ *   2. `http://localhost:5000` in development, so the app talks to the Express
+ *      server directly and the call is visible as a cross-origin fetch in
+ *      DevTools → Network
+ *   3. same origin in production, which is what a reverse proxy wants
+ *
+ * An explicitly empty value is meaningful: it means "same origin", which is the
+ * correct setting when the app is served by something that proxies `/api`.
+ * Only an *absent* variable falls through to the defaults.
  */
 export function resolveBaseUrl() {
   const configured = import.meta.env?.VITE_API_BASE_URL;
-  if (configured) return String(configured).replace(/\/+$/, '');
+
+  if (configured !== undefined && configured !== null) {
+    return String(configured).replace(/\/+$/, '');
+  }
+
+  if (import.meta.env?.DEV) return DEV_API_BASE_URL;
+
   return '';
 }
 
