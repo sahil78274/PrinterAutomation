@@ -3,6 +3,9 @@ import healthRoutes from './healthRoutes.js';
 import machineRoutes from './machineRoutes.js';
 import shopRoutes from './shopRoutes.js';
 import authRoutes from './authRoutes.js';
+import orderRoutes from './orderRoutes.js';
+import documentRoutes from './documentRoutes.js';
+import agentRoutes from './agentRoutes.js';
 import ApiError from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 
@@ -34,12 +37,34 @@ router.get('/', (req, res) =>
       machinesByShop: 'GET /api/machines?shopId=<id>',
       registerMachine: 'POST /api/machines',
       shops: 'GET /api/shops',
+      orders: {
+        create: 'POST /api/orders',
+        tracking: 'GET /api/orders/:orderId',
+        pay: 'POST /api/orders/:orderId/pay',
+        confirm: 'POST /api/orders/:orderId/confirm',
+      },
+      documents: {
+        upload: 'POST /api/documents (multipart, field "file")',
+        download: 'GET /api/documents/:documentId/file',
+      },
+      agents: {
+        register: 'POST /api/agents/register',
+        heartbeat: 'POST /api/agents/heartbeat',
+        nextJob: 'GET /api/agents/jobs/next',
+        download: 'GET /api/agents/jobs/:jobId/document',
+        printing: 'POST /api/agents/jobs/:jobId/printing',
+        complete: 'POST /api/agents/jobs/:jobId/complete',
+        fail: 'POST /api/agents/jobs/:jobId/fail',
+      },
     },
   }),
 );
 
 router.use('/health', healthRoutes);
 router.use('/auth', authRoutes);
+router.use('/orders', orderRoutes);
+router.use('/documents', documentRoutes);
+router.use('/agents', agentRoutes);
 router.use('/machines', machineRoutes);
 router.use('/shops', shopRoutes);
 
@@ -52,12 +77,9 @@ router.use('/shops', shopRoutes);
  */
 const PLANNED = {
   users: 'User and staff management',
-  documents: 'Document upload and validation',
-  orders: 'Print order creation and lifecycle',
   pricing: 'Quote calculation',
   payments: 'Payments and refunds',
   'print-jobs': 'Print job state machine',
-  agents: 'Local Print Agent heartbeat and job claim',
   analytics: 'Shop and platform reporting',
   subscriptions: 'Plan management and invoicing',
   admin: 'Platform administration',

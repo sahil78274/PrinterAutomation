@@ -10,32 +10,36 @@ verified · `[ ]` not started
 
 ## Stage A — Foundation, auth, tenancy
 
-- [ ] Data layer: repository contract with a Mongoose adapter (production) and an
-      in-memory adapter (tests). One interface, two implementations.
-- [ ] Password hashing (bcrypt) + password policy
-- [ ] JWT access tokens + rotated refresh tokens with revocation
-- [ ] `authenticate` / `requireRole` / `requireShopAccess` middleware
-- [ ] Registration, login, refresh, logout, password reset request/confirm
-- [ ] Rate limiting on auth endpoints
-- [ ] Audit log service
+- [~] Data layer: repository contract with a Mongoose adapter (production) and an
+  in-memory adapter (tests). One interface, two implementations.
+  _In-memory adapter is executed by the whole suite. The Mongoose adapter is
+  written and reviewed but cannot run here — no MongoDB._
+- [x] Password hashing (bcrypt) + password policy
+- [x] JWT access tokens + rotated refresh tokens with revocation
+- [x] `authenticate` / `requireRole` / `requireShopAccess` middleware
+- [x] Registration, login, refresh, logout, password reset request/confirm
+- [x] Rate limiting on auth endpoints
+- [x] Audit log service
 
 ## Stage B — Core domain
 
-- [ ] Shops: create, approve, suspend, profile, settings
-- [ ] Machines: create, activate, deactivate, QR token generation/rotation
-- [ ] Documents: upload validation (magic bytes, size), page counting
-- [ ] Pricing engine (server-side, integer paise)
-- [ ] Orders: create (server-priced), state machine
-- [ ] Dev-only payment provider with idempotency
-- [ ] Print job state machine + duplicate-prevention
+- [x] Shops: create, approve, suspend, profile, settings
+- [x] Machines: create, activate, deactivate, QR token generation/rotation
+- [x] Documents: upload validation (magic bytes, size), page counting
+- [x] Pricing engine (server-side, integer paise)
+- [x] Orders: create (server-priced), state machine
+- [x] Dev-only payment provider with idempotency
+- [x] Print job state machine + duplicate-prevention
 
 ## Stage C — Automation
 
-- [ ] Print agent registration + auth
-- [ ] Agent heartbeat / online-offline
-- [ ] Job pull + claim + progress reporting
-- [ ] Virtual printer mode
-- [ ] Socket.IO fan-out with tenant scoping
+- [x] Print agent registration + auth
+- [x] Agent heartbeat / online-offline
+- [x] Job pull + claim + progress reporting
+- [~] Virtual printer mode
+  _Server side complete and tested end-to-end. The Windows agent itself has
+  not been run against a real printer — no hardware in this environment._
+- [x] Socket.IO fan-out with tenant scoping
 
 ## Stage D — Frontend + ops
 
@@ -43,6 +47,24 @@ verified · `[ ]` not started
 - [ ] Customer portal → real orders
 - [ ] Shop + admin dashboards → real APIs
 - [ ] Deployment docs, env examples, agent install guide
+
+---
+
+## Test evidence
+
+Executed in this environment (`cd server && NODE_ENV=test npm test`):
+
+| Suite                                                             | Tests                        |
+| ----------------------------------------------------------------- | ---------------------------- |
+| Full backend suite                                                | 283 pass, 0 fail, 23 skipped |
+| `e2e.flow.test.js` — QR → upload → price → pay → print → complete | 22 pass                      |
+| `jobStateMachine.test.js`                                         | 31 pass                      |
+| `pricingEngine.test.js`                                           | 35 pass                      |
+| `health.api.test.js`                                              | 26 pass                      |
+| Frontend `npm run test:routes` / `npm run build`                  | clean                        |
+
+The 23 skips are Mongoose-model tests that require a live cluster. They are
+skipped, never reported as passing.
 
 ---
 

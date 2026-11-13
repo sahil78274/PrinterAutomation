@@ -40,3 +40,17 @@ function stripUndefined(object) {
 }
 
 export { PLANS, STATUSES };
+
+/** Validate an admin status change for a shop. */
+export function validateShopStatus(body = {}) {
+  const errors = {};
+  const allowed = ['pending', 'active', 'suspended', 'closed'];
+  const status = String(body.status ?? '').trim();
+  if (!status) errors.status = 'Status is required';
+  else if (!allowed.includes(status)) {
+    errors.status = `Status must be one of: ${allowed.join(', ')}`;
+  }
+
+  const reason = body.reason === undefined ? null : String(body.reason).trim().slice(0, 200);
+  return { value: { status, reason }, errors };
+}

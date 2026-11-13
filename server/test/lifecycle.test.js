@@ -145,38 +145,36 @@ describe('error envelope integrity', () => {
   });
 
   test('a deeply nested body is rejected without crashing', async () => {
-    // The admin guard would answer first on /api/machines, so this test uses a
-    // server where the guard is explicitly opened up.
-    const open = await startTestServer({ env: { ALLOW_ANONYMOUS_ADMIN: 'true' } });
-    try {
-      let nested = 'null';
-      for (let i = 0; i < 200; i += 1) nested = `{"a":${nested}}`;
+    // A 200-deep JSON body must be refused by the parser before any handler runs.
+    // Authentication now runs first on /api/machines, so this asserts on any
+    // 4xx rather than a specific one — the point is that nothing returns 500.
+    let nested = 'null';
+    for (let i = 0; i < 200; i += 1) nested = `{"a":${nested}}`;
 
-      const response = await request(open.baseUrl, '/api/machines', {
-        method: 'POST',
-        body: nested,
-      });
-      assert.ok([400, 413, 422].includes(response.status), `unexpected status ${response.status}`);
-      assert.equal(response.body.success, false);
-      assert.equal(typeof response.body.error.code, 'string');
-    } finally {
-      await open.close();
-    }
+    const response = await request(server.baseUrl, '/api/machines', {
+      method: 'POST',
+      body: nested,
+    });
+
+    assert.ok(
+      [400, 401, 413, 422].includes(response.status),
+      `unexpected status ${response.status}`,
+    );
+    assert.equal(response.body.success, false);
+    assert.equal(typeof response.body.error.code, 'string');
   });
 
-  test('the admin guard answers 404 before validation when closed', async () => {
-    const guarded = await startTestServer({ env: { ALLOW_ANONYMOUS_ADMIN: 'false' } });
-    try {
-      const response = await request(guarded.baseUrl, '/api/machines', {
-        method: 'POST',
-        body: {},
-      });
-      assert.equal(response.status, 404);
-      // Not 422: the existence of the route is not disclosed to anonymous users.
-      assert.notEqual(response.body.error.code, 'VALIDATION_ERROR');
-    } finally {
-      await guarded.close();
-    }
+  test('an unauthenticated write is refused before its body is validated', async () => {
+    // The route must disclose nothing to an anonymous caller: not the schema,
+    // not the field names. 401 comes first, so no validation detail leaks.
+    const response = await request(server.baseUrl, '/api/machines', {
+      method: 'POST',
+      body: {},
+    });
+
+    assert.equal(response.status, 401);
+    assert.notEqual(response.body.error.code, 'VALIDATION_ERROR');
+    assert.equal(response.body.error.details, undefined);
   });
 
   test('error messages never contain a stack trace', async () => {
