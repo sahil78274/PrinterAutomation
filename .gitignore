@@ -36,3 +36,12 @@ pnpm-debug.log*
 coverage
 .cache
 .temp
+
+# Print agent — never commit a machine's credentials or the documents it handles
+agent/agent.config.json
+agent/data/
+agent/virtual-prints/
+
+# Uploaded customer documents — private, never versioned
+server/storage/documents/
+server/storage/**/*.pdf

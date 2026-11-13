@@ -1,0 +1,23 @@
+{
+  "name": "smartprint-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Print Agent for SmartPrint — runs on the shop's Windows PC and drives the installed printer",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "smartprint-agent": "src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js run",
+    "register": "node src/index.js register",
+    "doctor": "node src/index.js doctor",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "optionalDependencies": {
+    "pdf-to-printer": "^5.6.0"
+  }
+}

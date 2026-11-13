@@ -1,0 +1,5 @@
+node_modules/
+agent.config.json
+data/
+virtual-prints/
+*.log
