@@ -6,6 +6,12 @@ import authRoutes from './authRoutes.js';
 import orderRoutes from './orderRoutes.js';
 import documentRoutes from './documentRoutes.js';
 import agentRoutes from './agentRoutes.js';
+import analyticsRoutes from './analyticsRoutes.js';
+import staffRoutes from './staffRoutes.js';
+import subscriptionRoutes from './subscriptionRoutes.js';
+import printJobRoutes from './printJobRoutes.js';
+import adminRoutes from './adminRoutes.js';
+import paymentRoutes from './paymentRoutes.js';
 import ApiError from '../utils/ApiError.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 
@@ -65,36 +71,19 @@ router.use('/auth', authRoutes);
 router.use('/orders', orderRoutes);
 router.use('/documents', documentRoutes);
 router.use('/agents', agentRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/staff', staffRoutes);
+router.use('/subscriptions', subscriptionRoutes);
+router.use('/print-jobs', printJobRoutes);
+router.use('/admin', adminRoutes);
+router.use('/payments', paymentRoutes);
 router.use('/machines', machineRoutes);
 router.use('/shops', shopRoutes);
 
 /**
- * Namespaces reserved for modules not built yet.
- *
- * Declaring them explicitly means: (a) a future module cannot silently collide
- * with an existing path, and (b) a caller gets "this exists but is not ready"
- * rather than a bare 404 that looks like a typo.
+ * Every namespace in the product brief is now mounted above. There are no
+ * reserved placeholders left: a 404 here means the URL is genuinely wrong,
+ * not that a feature is unbuilt.
  */
-const PLANNED = {
-  users: 'User and staff management',
-  pricing: 'Quote calculation',
-  payments: 'Payments and refunds',
-  'print-jobs': 'Print job state machine',
-  analytics: 'Shop and platform reporting',
-  subscriptions: 'Plan management and invoicing',
-  admin: 'Platform administration',
-  notifications: 'User notifications',
-};
-
-for (const [prefix, description] of Object.entries(PLANNED)) {
-  router.use(`/${prefix}`, (req, res, next) => {
-    next(
-      ApiError.notFound(`The /api/${prefix} namespace is reserved — ${description}`, {
-        code: 'NOT_IMPLEMENTED',
-        expose: true,
-      }),
-    );
-  });
-}
 
 export default router;

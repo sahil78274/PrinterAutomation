@@ -28,6 +28,11 @@ export const ROLES = Object.freeze({
   STAFF: 'staff',
 });
 
+/**
+ * Re-exported from the staff service so there is exactly one definition of the
+ * vocabulary. A guard and a grant that spell a permission differently would fail
+ * silently — the UI would show "granted", the route would say "forbidden".
+ */
 export const STAFF_PERMISSIONS = Object.freeze({
   /** Everything an owner can do to their own shop, minus destructive billing. */
   manageMachines: 'manageMachines',
@@ -35,6 +40,9 @@ export const STAFF_PERMISSIONS = Object.freeze({
   viewReports: 'viewReports',
   managePricing: 'managePricing',
 });
+
+// Guarded by a test: these must stay identical to staffService.PERMISSIONS.
+export const ALL_STAFF_PERMISSIONS = Object.values(STAFF_PERMISSIONS);
 
 function extractToken(req) {
   const header = req.headers.authorization ?? '';

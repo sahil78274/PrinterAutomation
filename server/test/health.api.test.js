@@ -87,34 +87,37 @@ describe('invalid routes', () => {
     assert.equal(res.body.error.code, 'ROUTE_NOT_FOUND');
   });
 
-  test('namespaces that are still unbuilt return an explanatory 404, not a stack trace', async () => {
-    for (const path of ['/api/analytics', '/api/subscriptions', '/api/admin/users']) {
-      // eslint-disable-next-line no-await-in-loop
-      const res = await request(harness.baseUrl, path);
-      assert.equal(res.status, 404, `${path} should be 404`);
-      assert.equal(res.body.success, false);
-      assert.equal(res.body.error.code, 'NOT_IMPLEMENTED');
-      // The message must tell a developer what the namespace is for, so a
-      // missing feature is never mistaken for a typo in the URL.
-      assert.match(res.body.error.message, /reserved/i);
-      assert.ok(res.body.error.message.length > 30);
-    }
-  });
+  test('every documented namespace is mounted, none is a placeholder', async () => {
+    // The build has no reserved namespaces left. Each of these must reach a real
+    // router: 401/400/422 are all fine — a 404 NOT_IMPLEMENTED is not.
+    const paths = [
+      '/api/auth/login',
+      '/api/orders',
+      '/api/documents',
+      '/api/agents/heartbeat',
+      '/api/analytics/shop',
+      '/api/staff',
+      '/api/subscriptions/plans',
+      '/api/print-jobs',
+      '/api/admin/users',
+      '/api/payments/provider',
+      '/api/machines',
+      '/api/shops',
+    ];
 
-  test('implemented namespaces are reachable and never answer with a placeholder', async () => {
-    // Each of these exists now. They may answer 401/400 — but never 404
-    // NOT_IMPLEMENTED, which would mean the route was not actually mounted.
-    const paths = ['/api/auth/login', '/api/orders', '/api/documents', '/api/agents/heartbeat'];
     for (const path of paths) {
       // eslint-disable-next-line no-await-in-loop
       const res = await request(harness.baseUrl, path);
       assert.notEqual(res.body?.error?.code, 'NOT_IMPLEMENTED', `${path} is still a placeholder`);
-      assert.ok(
-        !/reserved/i.test(res.body?.error?.message ?? ''),
-        `${path} answered with a reserved-namespace placeholder`,
-      );
       assert.ok(res.status < 500, `${path} returned ${res.status}`);
     }
+  });
+
+  test('an unknown namespace is a plain 404, not a reserved-namespace message', async () => {
+    const res = await request(harness.baseUrl, '/api/nonexistent-module');
+    assert.equal(res.status, 404);
+    assert.equal(res.body.success, false);
+    assert.equal(typeof res.body.error.code, 'string');
   });
 
   test('404 responses carry security headers', async () => {
