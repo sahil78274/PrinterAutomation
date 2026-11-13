@@ -1,7 +1,12 @@
 # SmartPrint — Architecture Notes
 
-This document explains the decisions behind the frontend and the contract the future backend must
-honour.
+This document explains the decisions behind the frontend and the contract the backend must honour.
+
+The backend foundation now exists in `server/` (Express + Mongoose). It implements the health,
+machine and shop surfaces described here; the sections below remain the contract for the order,
+payment and agent work that follows. Where the code and this document disagree, the code is the
+safer read — the response envelope and machine-ID rules are asserted by tests in
+`server/test/`.
 
 ## 1. Tenancy model
 
@@ -99,3 +104,49 @@ Client guards in `ProtectedRoute` are UX only. Every endpoint must re-authorise 
 - No file upload; PDFs are parsed in the browser and never leave the device.
 - No real gateway, no settlement engine, no agent.
 - Analytics are computed from the demo dataset, not a warehouse.
+
+## 8. API conventions (as implemented)
+
+**Response envelope.** Every endpoint returns one of exactly two shapes, so the client needs one
+parser:
+
+```jsonc
+// success
+{ "success": true, "data": { /* … */ }, "meta": { /* pagination, counts, … */ } }
+
+// failure
+{
+  "success": false,
+  "error": { "code": "VALIDATION_ERROR", "message": "…", "details": { "machineId": "…" } },
+  "requestId": "01J…"
+}
+```
+
+`requestId` is also sent as the `X-Request-Id` header and appears in the server log line for the
+same request, which is what makes a user-reported failure traceable without guessing.
+
+**Error codes are stable and machine-readable** (`VALIDATION_ERROR`, `NOT_FOUND`,
+`MACHINE_NOT_FOUND`, `ROUTE_NOT_FOUND`, `NOT_IMPLEMENTED`, `DATABASE_UNAVAILABLE`,
+`RATE_LIMITED`, `INTERNAL_ERROR`). Clients branch on `code`, never on message text.
+
+**Status-code rules**
+
+| Situation                               | Status | Code                   |
+| --------------------------------------- | ------ | ---------------------- |
+| Malformed input (bad ID, missing field) | 422    | `VALIDATION_ERROR`     |
+| Unknown but well-formed resource        | 404    | `…_NOT_FOUND`          |
+| Route reserved for a later phase        | 404    | `NOT_IMPLEMENTED`      |
+| Database required and unavailable       | 503    | `DATABASE_UNAVAILABLE` |
+| Rate limit exceeded                     | 429    | `RATE_LIMITED`         |
+
+Input validation always runs **before** the database guard, so a bad request is reported as bad
+even during an outage.
+
+**Health endpoints are exempt from rate limiting** and never touch the database on `/api/health`,
+so a monitoring system can always tell "process alive" from "database down".
+
+**Machine ID rules.** `SP-` followed by 3–6 digits, allocated centrally and never reused. Parsing is
+deliberately lenient (`sp-1`, `SP-001` and `sp-1` all resolve to `SP-001`) because IDs are read
+from stickers, screenshots and human typing; storage is always canonical. The uniqueness of a
+machine ID is enforced by a unique index, because a QR code that resolves to two printers is a
+billing incident, not a UI bug.
