@@ -2,7 +2,7 @@
   "name": "smartprint-server",
   "version": "1.0.0",
   "private": true,
-  "description": "SmartPrint backend foundation \u2014 Express + MongoDB API for multi-shop, multi-machine printing",
+  "description": "SmartPrint backend foundation — Express + MongoDB API for multi-shop, multi-machine printing",
   "type": "module",
   "main": "server.js",
   "engines": {
@@ -17,11 +17,16 @@
     "test:integration": "node --test test/db.integration.test.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
-    "mongoose": "^8.9.5"
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.9.5",
+    "multer": "^2.5.0",
+    "pdf-lib": "^1.17.1",
+    "socket.io": "^4.8.4"
   }
 }

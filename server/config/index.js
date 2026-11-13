@@ -95,6 +95,49 @@ const config = {
     // Placeholder so the CORS/helmet policy can be tightened per environment.
     exposeStackTraces: !isProduction,
   },
+
+  auth: {
+    /**
+     * Signing secret for access tokens.
+     *
+     * In production this MUST come from the environment — validateConfig
+     * refuses to boot otherwise. In development a per-process random secret is
+     * generated so tokens are never signed with a value that leaked into a
+     * repository. The consequence is honest: restarting the dev server
+     * invalidates every session.
+     */
+    jwtSecret: process.env.JWT_SECRET || null,
+    jwtSecretIsEphemeral: !process.env.JWT_SECRET,
+    issuer: 'smartprint',
+    audience: 'smartprint-api',
+    accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '15m',
+    refreshTokenTtlDays: toInt(process.env.REFRESH_TOKEN_TTL_DAYS, 30),
+    bcryptRounds: toInt(process.env.BCRYPT_ROUNDS, isTest ? 4 : 12),
+    // Refresh tokens are stored hashed; this pepper is part of that hash.
+    refreshTokenPepper: process.env.REFRESH_TOKEN_PEPPER || '',
+    passwordResetTtlMinutes: toInt(process.env.PASSWORD_RESET_TTL_MINUTES, 30),
+  },
+
+  uploads: {
+    // PDFs only, and small enough that a base64 body can never be the path.
+    maxBytes: toInt(process.env.UPLOAD_MAX_BYTES, 25 * 1024 * 1024),
+    // Temporary store. Documents are deleted after the retention window.
+    dir: process.env.UPLOAD_DIR || path.resolve(__dirname, '..', 'storage', 'documents'),
+    retentionHours: toInt(process.env.DOCUMENT_RETENTION_HOURS, 24),
+  },
+
+  payments: {
+    /**
+     * The only provider implemented is the development simulator.
+     * validateConfig refuses to start production with it enabled.
+     */
+    provider: process.env.PAYMENT_PROVIDER || 'development',
+    platformFeeBps: toInt(process.env.PLATFORM_FEE_BPS, 600),
+  },
+
+  realtime: {
+    enabled: toBool(process.env.REALTIME_ENABLED, true),
+  },
 };
 
 /**
@@ -131,6 +174,21 @@ export function validateConfig({ requireMongo = true } = {}) {
     // Silently allowing only localhost in production looks fine in tests and
     // breaks every real browser, so it must stop the process at boot.
     errors.push('CLIENT_URL is not set. Production must list at least one real origin.');
+  }
+
+  // Production must not run on an ephemeral signing secret, or every deploy
+  // silently logs all users out and tokens cannot be verified across instances.
+  if (isProduction && !config.auth.jwtSecret) {
+    errors.push('JWT_SECRET must be set in production.');
+  }
+  if (config.auth.jwtSecret && String(config.auth.jwtSecret).length < 32 && isProduction) {
+    errors.push('JWT_SECRET must be at least 32 characters in production.');
+  }
+
+  // The development payment provider simulates success. Shipping it to
+  // production would mean printing for free.
+  if (isProduction && config.payments.provider === 'development') {
+    errors.push('PAYMENT_PROVIDER=development is not allowed in production.');
   }
 
   if (errors.length) {
