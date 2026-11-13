@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Environment — NEVER commit real secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Runtime data
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Local MongoDB data (if you point mongod at a repo-local folder)
+data/
+db/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

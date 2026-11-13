@@ -1,14 +1,24 @@
 import { db, emitChange } from './db.js';
 import { DEMO_ACCOUNTS, ORDER_STATUS } from '../lib/constants.js';
+import apiClient from './apiClient.js';
 
 /**
- * Mock API layer.
+ * Service layer.
  *
- * Every function returns a Promise and simulates network latency so loading
- * states, skeletons and error handling are exercised exactly as they will be
- * against the real Node.js/Express API.
+ * Two implementations live side by side on purpose:
  *
- * Planned REST equivalents are documented above each function.
+ *  1. A mock, seeded in the browser (src/data/seed.js). It is the default, so
+ *     the demo works with no backend, no database and no credentials.
+ *  2. Calls to the real Express API, enabled per endpoint by VITE_API_BASE_URL
+ *     plus the LIVE_ENDPOINTS allowlist below.
+ *
+ * Only endpoints the backend actually implements today (health, machines,
+ * shops) are wired for live use. Everything else keeps its documented REST
+ * equivalent in the comment above it and returns mock data — swapping in the
+ * live call later is a one-line change here, with no UI churn.
+ *
+ * The mock bodies are unchanged and still exported indirectly through these
+ * wrappers, so scripts/flow-test.mjs keeps exercising the real preview flows.
  */
 
 const delay = (ms = 320) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -17,6 +27,53 @@ function notFound(message) {
   const error = new Error(message);
   error.status = 404;
   return error;
+}
+
+/* ----------------------------------------------------------- live switch --- */
+
+/** Live mode is opt-in: no base URL means the whole app runs on the mock. */
+export const isLiveMode = Boolean(import.meta.env?.VITE_API_BASE_URL);
+
+/**
+ * Endpoints with a real, implemented server counterpart.
+ *
+ * Kept as an explicit list rather than "live mode means all live" because a
+ * half-built backend would otherwise break working demo screens. Add a key here
+ * only once the route exists and is tested on the server.
+ */
+const LIVE_ENDPOINTS = new Set([
+  'getShops',
+  'getShop',
+  'getMachines',
+  'getMachine',
+  'createMachine',
+]);
+
+function hasLive(name) {
+  return isLiveMode && LIVE_ENDPOINTS.has(name);
+}
+
+/**
+ * Run the live implementation when enabled, otherwise the mock.
+ *
+ * The fallback is deliberately narrow: it only covers *transport* failures
+ * (server down, DNS, timeout). A 4xx from the API is a real answer and is
+ * rethrown, because silently serving invented data after a validation error
+ * would hide bugs in both layers.
+ */
+async function withLive(name, liveFn, mockFn) {
+  if (!hasLive(name)) return mockFn();
+
+  try {
+    return await liveFn();
+  } catch (error) {
+    if (error?.name === 'ApiClientError' && error.status === 0) {
+      // eslint-disable-next-line no-console
+      console.warn(`[api] ${name}: ${error.message} — falling back to mock data.`);
+      return mockFn();
+    }
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------ auth --- */
@@ -59,6 +116,15 @@ export async function me(token) {
 
 // GET /api/shops
 export async function getShops() {
+  return withLive(
+    'getShops',
+    () => apiClient.get('/api/shops'),
+    () => getShops_mock(),
+  );
+}
+
+/** Mock implementation — see the live wiring above. */
+async function getShops_mock() {
   await delay(280);
   return db.shops.map((shop) => {
     const machines = db.machines.filter((m) => m.shopId === shop.id);
@@ -77,6 +143,15 @@ export async function getShops() {
 
 // GET /api/shops/:id
 export async function getShop(shopId) {
+  return withLive(
+    'getShop',
+    () => apiClient.get(`/api/shops/${encodeURIComponent(shopId)}`),
+    () => getShop_mock(shopId),
+  );
+}
+
+/** Mock implementation — see the live wiring above. */
+async function getShop_mock(shopId) {
   await delay(240);
   const shop = db.shops.find((s) => s.id === shopId);
   if (!shop) throw notFound('Shop not found');
@@ -107,6 +182,15 @@ export async function updateShopSettings(shopId, settings) {
 
 // GET /api/machines?shopId=
 export async function getMachines({ shopId } = {}) {
+  return withLive(
+    'getMachines',
+    () => apiClient.get('/api/machines', { query: { shopId } }),
+    () => getMachines_mock({ shopId }),
+  );
+}
+
+/** Mock implementation — see the live wiring above. */
+async function getMachines_mock({ shopId } = {}) {
   await delay(300);
   const list = shopId ? db.machines.filter((m) => m.shopId === shopId) : db.machines;
   return list.map((m) => ({ ...m }));
@@ -114,6 +198,15 @@ export async function getMachines({ shopId } = {}) {
 
 // GET /api/machines/:machineId  (public — used by the QR portal)
 export async function getMachine(machineId) {
+  return withLive(
+    'getMachine',
+    () => apiClient.get(`/api/machines/${encodeURIComponent(machineId)}`),
+    () => getMachine_mock(machineId),
+  );
+}
+
+/** Mock implementation — see the live wiring above. */
+async function getMachine_mock(machineId) {
   await delay(380);
   const machine = db.machines.find((m) => m.id.toLowerCase() === String(machineId).toLowerCase());
   if (!machine) throw notFound(`Machine ${machineId} is not registered on SmartPrint.`);
@@ -137,14 +230,45 @@ export async function getMachine(machineId) {
 }
 
 // POST /api/machines
-export async function createMachine({
-  shopId,
-  name,
-  model,
-  supportsColor,
-  supportsDuplex,
-  pricing,
-}) {
+export async function createMachine(params) {
+  const { shopId, name, model, supportsColor, supportsDuplex } = params;
+  return withLive(
+    'createMachine',
+    () => createMachineLive({ shopId, name, model, supportsColor, supportsDuplex }),
+    () => createMachine_mock(params),
+  );
+}
+
+/**
+ * The server owns machine identity: it allocates the next SP-nnn, derives the
+ * QR path and applies mono/colour pricing rules. The client therefore sends
+ * printer capabilities, not IDs. The response is mapped back into the shape the
+ * mock (and every screen) already expects.
+ */
+async function createMachineLive({ shopId, name, model, supportsColor, supportsDuplex }) {
+  const created = await apiClient.post('/api/machines', {
+    shopId,
+    name,
+    printer: { model, supportsColor, supportsDuplex },
+  });
+
+  return {
+    id: created.machineId,
+    shopId: created.shopId,
+    shopName: created.shopName,
+    name: created.name,
+    model: created.printer?.model ?? model,
+    status: created.status,
+    qrSlug: created.machineId,
+    qrUrl: created.qrPath,
+    registeredOn: created.createdAt,
+    printer: created.printer,
+    pricing: created.pricing,
+  };
+}
+
+/** Mock implementation — see the live wiring above. */
+async function createMachine_mock({ shopId, name, model, supportsColor, supportsDuplex, pricing }) {
   await delay(700);
   const shop = db.shops.find((s) => s.id === shopId);
   if (!shop) throw notFound('Shop not found');

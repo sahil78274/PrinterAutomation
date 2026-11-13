@@ -1,0 +1,137 @@
+import dotenv from 'dotenv';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load server/.env (never committed). Falls back to real environment variables,
+// which is how production deployments should inject configuration.
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
+
+const toInt = (value, fallback) => {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const toBool = (value, fallback = false) => {
+  if (value === undefined || value === '') return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+};
+
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const isProduction = NODE_ENV === 'production';
+const isTest = NODE_ENV === 'test';
+
+const config = {
+  env: NODE_ENV,
+  isProduction,
+  isTest,
+
+  server: {
+    port: toInt(process.env.PORT, 5000),
+    // Bind address. 0.0.0.0 keeps the API reachable from the Vite dev server
+    // and from containerised previews.
+    host: process.env.HOST || '0.0.0.0',
+    // Graceful shutdown budget for in-flight requests.
+    shutdownTimeoutMs: toInt(process.env.SHUTDOWN_TIMEOUT_MS, 10_000),
+  },
+
+  cors: {
+    // Comma-separated list, e.g. "http://localhost:5173,https://smartprint.in".
+    // The localhost default exists for local development only; validateConfig
+    // refuses to start a production process that relies on it.
+    origins: (process.env.CLIENT_URL || 'http://localhost:5173')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean),
+    // True when the allowlist came from the dev fallback rather than config.
+    isDefault: !process.env.CLIENT_URL,
+  },
+
+  mongo: {
+    uri: process.env.MONGODB_URI || '',
+    // Fail fast instead of buffering commands for 10s when Mongo is unreachable.
+    serverSelectionTimeoutMS: toInt(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS, 8_000),
+    connectTimeoutMS: toInt(process.env.MONGO_CONNECT_TIMEOUT_MS, 8_000),
+    socketTimeoutMS: toInt(process.env.MONGO_SOCKET_TIMEOUT_MS, 45_000),
+    maxPoolSize: toInt(process.env.MONGO_MAX_POOL_SIZE, 10),
+    minPoolSize: toInt(process.env.MONGO_MIN_POOL_SIZE, 0),
+    autoIndex: !isProduction,
+    dbName: process.env.MONGO_DB_NAME || undefined,
+  },
+
+  rateLimit: {
+    // Global API limiter.
+    windowMs: toInt(process.env.RATE_LIMIT_WINDOW_MS, 15 * 60 * 1000),
+    max: toInt(process.env.RATE_LIMIT_MAX, 300),
+    // Tighter limiter for the public QR portal (order creation, uploads later).
+    publicWindowMs: toInt(process.env.PUBLIC_RATE_LIMIT_WINDOW_MS, 60 * 1000),
+    publicMax: toInt(process.env.PUBLIC_RATE_LIMIT_MAX, 60),
+    // Behind a proxy/load balancer (Render, Railway, nginx) this must be true,
+    // otherwise every client shares one bucket.
+    trustProxy: toBool(process.env.TRUST_PROXY, false),
+  },
+
+  logging: {
+    // 'dev' | 'combined' | 'common' | 'short' | 'tiny' | 'off'
+    // Kept dependency-free: a tiny request logger lives in middleware/requestLogger.js
+    level: process.env.LOG_LEVEL || (isTest ? 'off' : 'dev'),
+  },
+
+  security: {
+    // Cross-site request forgery protection arrives with cookie auth.
+    // Placeholder so the CORS/helmet policy can be tightened per environment.
+    exposeStackTraces: !isProduction,
+  },
+};
+
+/**
+ * Validate configuration once at boot so failures are loud and immediate
+ * rather than surfacing as a confusing runtime error later.
+ *
+ * Returns an array of warnings (non-fatal) and throws on fatal problems.
+ */
+export function validateConfig({ requireMongo = true } = {}) {
+  const warnings = [];
+  const errors = [];
+
+  if (!config.mongo.uri) {
+    if (requireMongo) {
+      errors.push(
+        'MONGODB_URI is not set. Copy server/.env.example to server/.env and set MONGODB_URI.',
+      );
+    } else {
+      warnings.push('MONGODB_URI is not set — database features are disabled.');
+    }
+  } else if (!/^mongodb(\+srv)?:\/\//.test(config.mongo.uri)) {
+    errors.push('MONGODB_URI must start with mongodb:// or mongodb+srv://.');
+  }
+
+  if (!config.cors.origins.length) {
+    errors.push('CLIENT_URL must list at least one allowed origin.');
+  }
+
+  if (config.isProduction && config.cors.origins.includes('*')) {
+    errors.push('Wildcard CORS origin is not allowed in production.');
+  }
+
+  if (config.isProduction && config.cors.isDefault) {
+    // Silently allowing only localhost in production looks fine in tests and
+    // breaks every real browser, so it must stop the process at boot.
+    errors.push('CLIENT_URL is not set. Production must list at least one real origin.');
+  }
+
+  if (errors.length) {
+    const error = new Error(`Invalid configuration:\n  - ${errors.join('\n  - ')}`);
+    error.name = 'ConfigError';
+    throw error;
+  }
+
+  return warnings;
+}
+
+export function isDatabaseConfigured() {
+  return Boolean(config.mongo.uri);
+}
+
+export default config;
