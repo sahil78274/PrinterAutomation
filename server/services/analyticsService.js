@@ -44,6 +44,33 @@ function isRevenueOrder(order) {
 }
 
 /**
+ * Split a set of orders into real and simulated revenue, in paise.
+ *
+ * Simulated (development-provider) payments are counted, but reported
+ * separately. Excluding them outright would leave every dashboard at zero and
+ * hide whether analytics work at all; including them silently would present
+ * fake money as takings. Splitting is the only truthful, useful option — and
+ * every response states which portion is simulated.
+ */
+function splitRevenue(orders) {
+  let realPaise = 0;
+  let simulatedPaise = 0;
+
+  for (const order of orders) {
+    const amount = order.totals?.totalPaise ?? 0;
+    if (order.simulated === true) simulatedPaise += amount;
+    else realPaise += amount;
+  }
+
+  return {
+    realPaise,
+    simulatedPaise,
+    totalPaise: realPaise + simulatedPaise,
+    entirelySimulated: realPaise === 0 && simulatedPaise > 0,
+  };
+}
+
+/**
  * Shop dashboard summary.
  *
  * @param {string} shopId
@@ -64,13 +91,11 @@ export async function shopSummary(shopId, { days = 30 } = {}) {
   ]);
 
   const inWindow = orders.filter(
-    (order) =>
-      withinRange(order.createdAt, windowStart, now) &&
-      isRevenueOrder(order) &&
-      order.simulated !== true,
+    (order) => withinRange(order.createdAt, windowStart, now) && isRevenueOrder(order),
   );
 
-  const revenuePaise = inWindow.reduce((sum, order) => sum + (order.totals?.totalPaise ?? 0), 0);
+  const revenueSplit = splitRevenue(inWindow);
+  const revenuePaise = revenueSplit.totalPaise;
   const platformFeePaise = inWindow.reduce(
     (sum, order) => sum + (order.totals?.platformFeePaise ?? 0),
     0,
@@ -85,11 +110,13 @@ export async function shopSummary(shopId, { days = 30 } = {}) {
     end.setHours(23, 59, 59, 999);
 
     const dayOrders = inWindow.filter((order) => withinRange(order.createdAt, start, end));
+    const daySplit = splitRevenue(dayOrders);
 
     daily.push({
       date: isoDay(start),
       orders: dayOrders.length,
-      revenuePaise: dayOrders.reduce((sum, o) => sum + (o.totals?.totalPaise ?? 0), 0),
+      revenuePaise: daySplit.totalPaise,
+      simulatedPaise: daySplit.simulatedPaise,
       sheets: dayOrders.reduce((sum, o) => sum + (o.sheetCount ?? 0), 0),
     });
   }
@@ -122,6 +149,10 @@ export async function shopSummary(shopId, { days = 30 } = {}) {
       netPaise: revenuePaise - platformFeePaise,
       orderCount: inWindow.length,
       averageOrderPaise: inWindow.length ? Math.round(revenuePaise / inWindow.length) : 0,
+      // The honest breakdown: a dashboard must show this, not just the total.
+      simulatedPaise: revenueSplit.simulatedPaise,
+      realPaise: revenueSplit.realPaise,
+      entirelySimulated: revenueSplit.entirelySimulated,
     },
     volume: {
       sheets: sheetsPrinted,
@@ -208,13 +239,11 @@ export async function platformSummary({ days = 30 } = {}) {
   ]);
 
   const revenueOrders = orders.filter(
-    (order) =>
-      withinRange(order.createdAt, windowStart, now) &&
-      isRevenueOrder(order) &&
-      order.simulated !== true,
+    (order) => withinRange(order.createdAt, windowStart, now) && isRevenueOrder(order),
   );
 
-  const grossPaise = revenueOrders.reduce((sum, o) => sum + (o.totals?.totalPaise ?? 0), 0);
+  const platformSplit = splitRevenue(revenueOrders);
+  const grossPaise = platformSplit.totalPaise;
   const feePaise = revenueOrders.reduce((sum, o) => sum + (o.totals?.platformFeePaise ?? 0), 0);
 
   // Per-shop revenue, highest first — the table an admin actually wants.
@@ -259,6 +288,9 @@ export async function platformSummary({ days = 30 } = {}) {
       platformFeePaise: feePaise,
       shopPayoutPaise: grossPaise - feePaise,
       paidOrders: revenueOrders.length,
+      simulatedPaise: platformSplit.simulatedPaise,
+      realPaise: platformSplit.realPaise,
+      entirelySimulated: platformSplit.entirelySimulated,
     },
     jobs: {
       total: jobs.length,

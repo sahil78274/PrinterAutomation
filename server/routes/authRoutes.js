@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  bootstrapAdminHandler,
   register,
   loginHandler,
   refreshHandler,
@@ -13,6 +14,7 @@ import { authenticate, optionalAuth } from '../middleware/auth.js';
 import { loginLimiter, passwordResetLimiter, registerLimiter } from '../middleware/rateLimiters.js';
 import validate from '../middleware/validate.js';
 import {
+  validateBootstrapAdmin,
   validateLogin,
   validateRegister,
   validateRefresh,
@@ -38,6 +40,14 @@ router.post('/refresh', validate(validateRefresh), refreshHandler);
 // Logout works with a refresh token, or with a live access token plus
 // allSessions to end every session on the account.
 router.post('/logout', optionalAuth, validate(validateLogout), logoutHandler);
+
+// First-admin bootstrap. Closed unless ADMIN_SETUP_KEY is configured.
+router.post(
+  '/bootstrap-admin',
+  loginLimiter,
+  validate(validateBootstrapAdmin),
+  bootstrapAdminHandler,
+);
 
 router.get('/me', authenticate, meHandler);
 

@@ -113,6 +113,16 @@ const config = {
     accessTokenTtl: process.env.ACCESS_TOKEN_TTL || '15m',
     refreshTokenTtlDays: toInt(process.env.REFRESH_TOKEN_TTL_DAYS, 30),
     bcryptRounds: toInt(process.env.BCRYPT_ROUNDS, isTest ? 4 : 12),
+
+    /**
+     * Key required to create the *first* platform administrator.
+     *
+     * Bootstrapping an admin is a chicken-and-egg problem: there is nobody to
+     * grant the role. Rather than leaving an open "create admin" endpoint or
+     * shipping a default password in git, the endpoint demands a key that the
+     * operator sets in the environment. When it is unset the route is closed.
+     */
+    adminSetupKey: process.env.ADMIN_SETUP_KEY || null,
     // Refresh tokens are stored hashed; this pepper is part of that hash.
     refreshTokenPepper: process.env.REFRESH_TOKEN_PEPPER || '',
     passwordResetTtlMinutes: toInt(process.env.PASSWORD_RESET_TTL_MINUTES, 30),

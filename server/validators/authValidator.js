@@ -1,4 +1,5 @@
 import { cleanString, isEmail } from './common.js';
+import { validatePassword } from '../services/passwordService.js';
 
 /**
  * Auth request validation.
@@ -119,6 +120,43 @@ export function validatePasswordChange(body = {}) {
   const passwordIssue = passwordErrors(body.newPassword);
   if (passwordIssue) errors.newPassword = passwordIssue;
   else value.newPassword = String(body.newPassword);
+
+  return { value, errors };
+}
+
+/**
+ * Validate a first-admin bootstrap request.
+ *
+ * Deliberately strict about the password: this account controls every tenant on
+ * the platform, so it gets the full policy rather than a relaxed one.
+ */
+export function validateBootstrapAdmin(body = {}) {
+  const errors = {};
+  const value = {};
+
+  const name = cleanString(body.name, 80);
+  if (!name || name.length < 2) errors.name = 'Enter a name';
+  else value.name = name;
+
+  const email = String(body.email ?? '')
+    .trim()
+    .toLowerCase();
+  if (!email) errors.email = 'Email is required';
+  else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Enter a valid email address';
+  else value.email = email;
+
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (!password) {
+    errors.password = 'A password is required';
+  } else {
+    const problems = validatePassword(password);
+    if (problems.length) errors.password = problems[0];
+    else value.password = password;
+  }
+
+  const setupKey = String(body.setupKey ?? '');
+  if (!setupKey) errors.setupKey = 'A setup key is required';
+  else value.setupKey = setupKey;
 
   return { value, errors };
 }

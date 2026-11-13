@@ -43,10 +43,13 @@ verified · `[ ]` not started
 
 ## Stage D — Frontend + ops
 
-- [ ] Auth wired to real API
-- [ ] Customer portal → real orders
-- [ ] Shop + admin dashboards → real APIs
-- [ ] Deployment docs, env examples, agent install guide
+- [x] Auth wired to real API
+- [~] Customer portal → real orders
+  _The service layer and every endpoint are live-capable and exercised by
+  `scripts/acceptance.mjs`. The portal screens were not re-pointed at live
+  mode by default, so `VITE_API_LIVE_DATA=false` still shows seeded demo data._
+- [x] Shop + admin dashboards → real APIs
+- [x] Deployment docs, env examples, agent install guide
 
 ---
 

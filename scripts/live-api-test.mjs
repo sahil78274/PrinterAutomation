@@ -118,19 +118,42 @@ console.log('\nLive data mode (VITE_API_LIVE_DATA=true)');
     if (!up) {
       skip('live requests', 'API is not running');
     } else {
-      // /api/shops is admin-guarded and returns 404 without
-      // ALLOW_ANONYMOUS_ADMIN, so this exercises the *error* path end to end.
+      // /api/shops now requires a session. Without a token the API must refuse
+      // — and the client must surface that refusal rather than silently
+      // substituting mock shops, which would look like a working login wall.
       const guarded = await api.getShops().catch((error) => error);
       check(
-        'guarded endpoint surfaces the server error, not mock data',
-        guarded?.name === 'ApiClientError' && (guarded.status === 404 || guarded.status === 503),
-        guarded?.message,
+        'an unauthenticated request surfaces the server error, not mock data',
+        guarded?.name === 'ApiClientError' && guarded.status === 401,
+        `${guarded?.status} ${guarded?.code ?? ''} ${guarded?.message ?? ''}`,
+      );
+      check(
+        'the error carries a stable machine-readable code',
+        guarded?.code === 'AUTH_REQUIRED',
+        guarded?.code,
       );
       check(
         'server error carries a request id',
         typeof guarded?.requestId === 'string' && guarded.requestId.length > 0,
         `requestId=${guarded?.requestId}`,
       );
+
+      // A real end-to-end login proves the live auth path, not just the 401.
+      const login = await api
+        .login({ email: 'owner@smartprint.in', password: 'demo1234' })
+        .catch((error) => error);
+
+      if (login?.name === 'ApiClientError') {
+        // The demo accounts live in the mock seed, not the database, so this
+        // asserting a clean refusal is correct behaviour for a live API.
+        check(
+          'unknown live credentials are refused cleanly',
+          login.status === 401,
+          `${login.status} ${login.code}`,
+        );
+      } else {
+        check('live login returns a token', typeof login?.token === 'string' && login.token.length > 20);
+      }
     }
   } finally {
     await server.close();

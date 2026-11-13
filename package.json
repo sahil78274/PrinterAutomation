@@ -14,7 +14,8 @@
     "test:flow": "node scripts/flow-test.mjs",
     "test:a11y": "node scripts/a11y-check.mjs",
     "test:live-api": "node scripts/live-api-test.mjs",
-    "test": "npm run lint && npm run test:routes && npm run test:flow && npm run test:a11y && npm run test:live-api"
+    "test": "npm run lint && npm run test:routes && npm run test:flow && npm run test:a11y && npm run test:live-api",
+    "test:acceptance": "node scripts/acceptance.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.1.1",
