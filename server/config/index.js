@@ -148,6 +148,31 @@ const config = {
   realtime: {
     enabled: toBool(process.env.REALTIME_ENABLED, true),
   },
+
+  email: {
+    /**
+     * SMTP configuration for sending emails (password resets, welcome emails, etc.)
+     *
+     * When not configured:
+     * - Password reset tokens are logged to console in development
+     * - The frontend shows a clear message that email delivery is disabled
+     * - No emails are sent
+     *
+     * For production, all five SMTP_* variables must be set.
+     */
+    smtp: {
+      host: process.env.SMTP_HOST || null,
+      port: toInt(process.env.SMTP_PORT, 587),
+      user: process.env.SMTP_USER || null,
+      pass: process.env.SMTP_PASS || null,
+      from: process.env.SMTP_FROM || null, // e.g. "SmartPrint <noreply@smartprint.in>"
+    },
+    /**
+     * Base URL used for building password reset links.
+     * Falls back to CLIENT_URL or localhost.
+     */
+    appUrl: process.env.APP_URL || process.env.CLIENT_URL || 'http://localhost:5173',
+  },
 };
 
 /**

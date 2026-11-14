@@ -14,7 +14,8 @@
     "test": "node --test \"test/*.test.js\"",
     "test:unit": "node --test test/utils.test.js test/models.test.js test/pricing.test.js test/machine.test.js",
     "test:api": "node --test test/health.api.test.js test/lifecycle.test.js",
-    "test:integration": "node --test test/db.integration.test.js"
+    "test:integration": "node --test test/db.integration.test.js",
+    "create-admin": "node scripts/create-admin.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -9,6 +9,7 @@ import {
   requestPasswordResetHandler,
   confirmPasswordResetHandler,
   changePasswordHandler,
+  emailStatusHandler,
 } from '../controllers/authController.js';
 import { authenticate, optionalAuth } from '../middleware/auth.js';
 import { loginLimiter, passwordResetLimiter, registerLimiter } from '../middleware/rateLimiters.js';
@@ -50,6 +51,9 @@ router.post(
 );
 
 router.get('/me', authenticate, meHandler);
+
+// Email delivery status — used by frontend to show appropriate messaging
+router.get('/email-status', emailStatusHandler);
 
 router.post(
   '/password/forgot',

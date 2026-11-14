@@ -12,6 +12,7 @@ const LandingPage = lazy(() => import('./pages/public/LandingPage.jsx'));
 const LoginPage = lazy(() => import('./pages/public/LoginPage.jsx'));
 const RegisterPage = lazy(() => import('./pages/public/RegisterPage.jsx'));
 const ForgotPasswordPage = lazy(() => import('./pages/public/ForgotPasswordPage.jsx'));
+const ResetPasswordPage = lazy(() => import('./pages/public/ResetPasswordPage.jsx'));
 const AboutPage = lazy(() => import('./pages/public/AboutPage.jsx'));
 const ContactPage = lazy(() => import('./pages/public/ContactPage.jsx'));
 const TermsPage = lazy(() => import('./pages/public/TermsPage.jsx'));
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/contact" element={<ContactPage />} />
           <Route path="/terms" element={<TermsPage />} />

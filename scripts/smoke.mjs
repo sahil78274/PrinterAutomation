@@ -82,9 +82,9 @@ const session = (role) =>
 
 const ROUTES = [
   { path: '/', role: null, expect: 'Scan. Upload. Print.' },
-  { path: '/login', role: null, expect: 'Sign in to SmartPrint' },
-  { path: '/register', role: null, expect: 'Create your account' },
-  { path: '/forgot-password', role: null, expect: 'Reset password' },
+  { path: '/login', role: null, expect: 'Enter your credentials' },
+  { path: '/register', role: null, expect: 'Register your shop' },
+  { path: '/forgot-password', role: null, expect: 'Reset your password' },
   { path: '/about', role: null, expect: 'About SmartPrint' },
   { path: '/contact', role: null, expect: 'Contact' },
   { path: '/terms', role: null, expect: 'Terms and Conditions' },

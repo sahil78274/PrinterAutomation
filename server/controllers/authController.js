@@ -6,6 +6,7 @@ import ApiError from '../utils/ApiError.js';
 import * as authService from '../services/authService.js';
 import { revokeRefreshToken } from '../services/tokenService.js';
 import { audit } from '../services/auditService.js';
+import { getEmailStatus, sendPasswordResetEmail } from '../services/emailService.js';
 
 /**
  * Auth HTTP layer. No business rules here — validation, hashing and token
@@ -41,7 +42,15 @@ export const loginHandler = asyncHandler(async (req, res) => {
     shopId: result.user.shopId ?? null,
   });
 
-  return sendSuccess(res, result);
+  // Load shop context for the response so the frontend gets shop info immediately
+  const { getRepository } = await import('../repositories/active.js');
+  const repo = getRepository();
+  const shop = result.user.shopId ? await repo.findById('shops', result.user.shopId) : null;
+
+  return sendSuccess(res, {
+    ...result,
+    shop,
+  });
 });
 
 export const refreshHandler = asyncHandler(async (req, res) => {
@@ -75,10 +84,40 @@ export const meHandler = asyncHandler(async (req, res) => {
   return sendSuccess(res, profile);
 });
 
+/**
+ * Password reset — request step.
+ *
+ * Always returns 200 regardless of whether the email exists (no user enumeration).
+ * When SMTP is configured, sends a real email.
+ * When SMTP is not configured:
+ *   - In development: logs the token to console for testing
+ *   - Always reports the email delivery status honestly
+ */
 export const requestPasswordResetHandler = asyncHandler(async (req, res) => {
-  // Always 200: whether the address exists is not disclosed.
   const result = await authService.requestPasswordReset({ email: req.body.email });
-  return sendSuccess(res, result);
+
+  // If the user exists and a token was generated, send email
+  if (result.developmentToken) {
+    const { getRepository } = await import('../repositories/active.js');
+    const repo = getRepository();
+    const user = await repo.findOne('users', { email: req.body.email?.trim().toLowerCase() });
+
+    if (user) {
+      const resetUrl = `${config.email.appUrl}/reset-password?token=${result.developmentToken}`;
+      await sendPasswordResetEmail({
+        to: user.email,
+        resetToken: result.developmentToken,
+        resetUrl,
+        userName: user.name,
+      });
+    }
+  }
+
+  // Return email status so the frontend knows if a real email was sent
+  return sendSuccess(res, {
+    requested: true,
+    email: getEmailStatus(),
+  });
 });
 
 export const confirmPasswordResetHandler = asyncHandler(async (req, res) => {
@@ -154,4 +193,14 @@ export const bootstrapAdminHandler = asyncHandler(async (req, res) => {
   });
 
   return created ? sendCreated(res, { user, created }) : sendSuccess(res, { user, created });
+});
+
+/**
+ * GET /api/auth/email-status
+ *
+ * Returns the current email delivery configuration status.
+ * Used by the frontend to show appropriate messaging about password reset.
+ */
+export const emailStatusHandler = asyncHandler(async (req, res) => {
+  return sendSuccess(res, getEmailStatus());
 });

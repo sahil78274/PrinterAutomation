@@ -6,7 +6,7 @@ import Badge from '../../components/ui/Badge.jsx';
 import Modal from '../../components/ui/Modal.jsx';
 import Input from '../../components/ui/Input.jsx';
 import { useToast } from '../../context/ToastContext.jsx';
-import { db } from '../../services/db.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 
 const STAFF_ROLES = [
   { id: 'operator', label: 'Counter operator', permissions: 'View orders, manage print queue' },
@@ -15,17 +15,18 @@ const STAFF_ROLES = [
 ];
 
 export default function ShopStaff() {
+  const { user } = useAuth();
   const [showAddModal, setShowAddModal] = useState(false);
   const [staff, setStaff] = useState(() => getInitialStaff());
   const toast = useToast();
 
   function getInitialStaff() {
-    const shop = db.shops[0];
+    // Use current user's info if available, otherwise fallback to shop data
     return [
       {
         id: 'staff_1',
-        name: shop?.ownerName ?? 'Shop Owner',
-        email: 'owner@smartprint.in',
+        name: user?.name ?? 'Shop Owner',
+        email: user?.email ?? '',
         role: 'owner',
         status: 'active',
         addedAt: '2025-01-15',
