@@ -1,4 +1,4 @@
-import { cleanString, isEmail } from './common.js';
+import { cleanString, isEmail, isBlank } from './common.js';
 import { validatePassword } from '../services/passwordService.js';
 
 /**
@@ -14,6 +14,7 @@ function passwordErrors(password) {
   const value = String(password ?? '');
   if (!value) return 'Password is required';
   if (value.length < 8) return 'Password must be at least 8 characters';
+  if (value.length > 72) return 'Password must be at most 72 characters';
   if (!/[a-zA-Z]/.test(value)) return 'Password must contain a letter';
   if (!/\d/.test(value)) return 'Password must contain a number';
   return null;
@@ -32,12 +33,50 @@ function emailValue(errors, raw) {
   return email.toLowerCase();
 }
 
+/**
+ * Indian mobile number validation.
+ * Accepts +91XXXXXXXXXX, 91XXXXXXXXXX, or 10-digit starting with 6-9.
+ */
+function phoneErrors(phone) {
+  const value = String(phone ?? '').replace(/[\s\-()]/g, '');
+  if (!value) return 'Mobile number is required';
+  // Strip +91 or 91 prefix
+  const digits = value.replace(/^\+?91/, '');
+  if (!/^[6-9]\d{9}$/.test(digits)) {
+    return 'Enter a valid 10-digit Indian mobile number';
+  }
+  return null;
+}
+
+/**
+ * Indian PIN code validation (6 digits).
+ */
+function pincodeErrors(pincode) {
+  const value = String(pincode ?? '').trim();
+  if (!value) return 'PIN code is required';
+  if (!/^\d{6}$/.test(value)) {
+    return 'PIN code must be a 6-digit number';
+  }
+  return null;
+}
+
+/**
+ * Validate shop owner registration.
+ *
+ * Accepts all required fields for a real production registration:
+ * Shop info: shopName, ownerName, email, phone, address, city, state, pincode
+ * Account info: password, termsAccepted
+ *
+ * Role is NEVER read from the body — public signup creates an owner only.
+ * Accepting role here would be a privilege-escalation hole.
+ */
 export function validateRegister(body = {}) {
   const errors = {};
   const value = {};
 
-  value.name = cleanString(body.name, 120);
-  if (!value.name) errors.name = 'Your name is required';
+  // --- Account information ---
+  value.name = cleanString(body.name ?? body.ownerName, 120);
+  if (!value.name) errors.name = 'Owner name is required';
 
   value.email = emailValue(errors, body.email);
 
@@ -45,13 +84,34 @@ export function validateRegister(body = {}) {
   if (passwordIssue) errors.password = passwordIssue;
   else value.password = String(body.password);
 
+  // --- Shop information ---
   value.shopName = cleanString(body.shopName, 120);
   if (!value.shopName) errors.shopName = 'Shop name is required';
 
   value.phone = cleanString(body.phone, 20);
+  const phoneIssue = phoneErrors(body.phone);
+  if (phoneIssue) errors.phone = phoneIssue;
 
-  // Role is intentionally not read from the body. Public signup creates an
-  // owner; accepting `role` here would be a privilege-escalation hole.
+  // --- Address information ---
+  value.address = cleanString(body.address, 200);
+  if (!value.address) errors.address = 'Shop address is required';
+
+  value.city = cleanString(body.city, 80);
+  if (!value.city) errors.city = 'City is required';
+
+  value.state = cleanString(body.state, 80);
+  if (!value.state) errors.state = 'State is required';
+
+  value.pincode = cleanString(body.pincode, 12);
+  const pincodeIssue = pincodeErrors(body.pincode);
+  if (pincodeIssue) errors.pincode = pincodeIssue;
+
+  // --- Terms acceptance ---
+  if (!body.termsAccepted && body.termsAccepted !== true) {
+    errors.termsAccepted = 'You must accept the Terms and Conditions';
+  }
+  value.termsAccepted = body.termsAccepted === true;
+
   return { value, errors };
 }
 

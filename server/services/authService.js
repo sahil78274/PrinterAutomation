@@ -69,6 +69,19 @@ async function findUserByEmail(email) {
  * There is no multi-document transaction available in the memory adapter, so
  * the shop is created first and a failure rolls it back explicitly — which is
  * also what a `withTransaction` block would do, just less elegantly.
+ *
+ * @param {object} params
+ * @param {string} params.name - Owner full name
+ * @param {string} params.email - Business email
+ * @param {string} params.password - Password (already validated)
+ * @param {string} params.phone - Mobile number
+ * @param {string} params.shopName - Shop name
+ * @param {string} params.address - Shop street address
+ * @param {string} params.city - City
+ * @param {string} params.state - State
+ * @param {string} params.pincode - PIN code
+ * @param {boolean} params.termsAccepted - Terms acceptance flag
+ * @param {string} [params.userAgent] - Browser user agent
  */
 export async function registerShopOwner({
   name,
@@ -76,6 +89,11 @@ export async function registerShopOwner({
   password,
   phone = null,
   shopName,
+  address,
+  city,
+  state,
+  pincode,
+  termsAccepted = false,
   userAgent = null,
 }) {
   const repo = getRepository();
@@ -103,7 +121,9 @@ export async function registerShopOwner({
   }
 
   const shopName_ = String(shopName ?? '').trim() || `${String(name ?? '').trim()}'s shop`;
-  const shop = await repo.insert('shops', {
+
+  // Build shop record with full address
+  const shopData = {
     shopCode: await generateShopCode(),
     name: shopName_,
     ownerName: String(name ?? '').trim(),
@@ -114,12 +134,22 @@ export async function registerShopOwner({
     planStatus: 'trial',
     trialEndsAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
     machineCount: 0,
+    address: {
+      line1: address || null,
+      city: city || null,
+      state: state || null,
+      pincode: pincode || null,
+      country: 'India',
+    },
+    termsAcceptedAt: termsAccepted ? new Date().toISOString() : null,
     settings: {
       acceptOrders: true,
       requirePaymentBeforePrint: true,
       maxUploadMb: 25,
     },
-  });
+  };
+
+  const shop = await repo.insert('shops', shopData);
 
   let user;
   try {
@@ -135,6 +165,7 @@ export async function registerShopOwner({
       lastLoginAt: new Date().toISOString(),
     });
   } catch (error) {
+    // Rollback the shop if user creation fails to avoid orphaned shops
     await repo.softDelete('shops', shop.id);
     throw error;
   }

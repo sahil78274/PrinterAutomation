@@ -109,39 +109,14 @@ export const BINDING_LABEL = {
   spiral: 'Spiral bound',
 };
 
-/** Demo accounts. Passwords are intentionally visible: this is a frontend-only preview. */
-export const DEMO_ACCOUNTS = [
-  {
-    id: 'usr_shop_01',
-    role: 'shop',
-    name: 'Rohit Sharma',
-    email: 'owner@smartprint.in',
-    password: 'demo1234',
-    shopId: 'shop_hsr_01',
-    shopName: 'Sharma Digital Press',
-    title: 'Owner',
-  },
-  {
-    id: 'usr_shop_02',
-    role: 'shop',
-    name: 'Neha Verma',
-    email: 'campus@smartprint.in',
-    password: 'demo1234',
-    shopId: 'shop_hsr_02',
-    shopName: 'Campus Copy Centre',
-    title: 'Manager',
-  },
-  {
-    id: 'usr_admin_01',
-    role: 'admin',
-    name: 'Aarav Mehta',
-    email: 'admin@smartprint.in',
-    password: 'demo1234',
-    shopId: null,
-    shopName: 'SmartPrint Platform',
-    title: 'Super Admin',
-  },
-];
+/**
+ * Demo accounts removed from production UI.
+ *
+ * These are kept only for test scripts and flow tests that still reference them.
+ * They are NEVER shown on the login page or used in the normal application flow.
+ * Real authentication is backed by the Express API and MongoDB.
+ */
+export const DEMO_ACCOUNTS = [];
 
 export const STATUS_TONES = {
   success: 'bg-success/10 text-success ring-success/20',

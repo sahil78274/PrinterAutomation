@@ -135,5 +135,19 @@ export async function disconnectDatabase() {
   await mongoose.connection.close(false);
 }
 
+/**
+ * Connect to MongoDB with a default console logger.
+ * Used by CLI scripts and other non-server entry points.
+ */
+export async function connectToDatabase() {
+  const consoleLogger = {
+    info: (msg) => console.log(`[DB] ${msg}`),
+    warn: (msg) => console.warn(`[DB] ${msg}`),
+    error: (msg) => console.error(`[DB] ${msg}`),
+    debug: () => {},
+  };
+  return connectDatabase(consoleLogger);
+}
+
 /** Re-export for convenience so models import a single mongoose instance. */
 export { mongoose };

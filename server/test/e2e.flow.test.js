@@ -92,6 +92,12 @@ before(async () => {
       email: 'priya@shop.test',
       password: 'OwnerPass123',
       shopName: 'Priya Prints',
+      phone: '9876543210',
+      address: '123 Test Street',
+      city: 'Hisar',
+      state: 'Haryana',
+      pincode: '125001',
+      termsAccepted: true,
     },
   });
   owner = { token: registration.body.data.accessToken, ...registration.body.data.user };

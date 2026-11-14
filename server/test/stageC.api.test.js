@@ -44,7 +44,18 @@ before(async () => {
   const register = async (email, shopName) => {
     const response = await request(harness.baseUrl, '/api/auth/register', {
       method: 'POST',
-      body: { name: shopName, email, password: 'OwnerPass123', shopName },
+      body: {
+        name: shopName,
+        email,
+        password: 'OwnerPass123',
+        shopName,
+        phone: '9876543210',
+        address: '123 Test Street',
+        city: 'Hisar',
+        state: 'Haryana',
+        pincode: '125001',
+        termsAccepted: true,
+      },
     });
     const shop = response.body.data.shop;
     await getRepository().updateById('shops', shop.id, { status: 'active' });

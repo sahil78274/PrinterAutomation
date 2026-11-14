@@ -47,7 +47,7 @@ export function AuthProvider({ children }) {
       setBooting,
       login,
       logout,
-      isShopOwner: session?.user?.role === 'shop',
+      isShopOwner: session?.user?.role === 'owner' || session?.user?.role === 'shop',
       isAdmin: session?.user?.role === 'admin',
     }),
     [session, booting, login, logout],

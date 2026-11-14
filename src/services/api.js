@@ -1,24 +1,16 @@
 import { db, emitChange } from './db.js';
-import { DEMO_ACCOUNTS, ORDER_STATUS } from '../lib/constants.js';
+import { ORDER_STATUS } from '../lib/constants.js';
 import apiClient from './apiClient.js';
 
 /**
  * Service layer.
  *
- * Two implementations live side by side on purpose:
+ * Authentication (login, register, password reset) always calls the real backend.
+ * There is no mock fallback for auth — a fake login would be a security hole.
  *
- *  1. A mock, seeded in the browser (src/data/seed.js). It is the default, so
- *     the demo works with no backend, no database and no credentials.
- *  2. Calls to the real Express API, enabled per endpoint by VITE_API_BASE_URL
- *     plus the LIVE_ENDPOINTS allowlist below.
- *
- * Only endpoints the backend actually implements today (health, machines,
- * shops) are wired for live use. Everything else keeps its documented REST
- * equivalent in the comment above it and returns mock data — swapping in the
- * live call later is a one-line change here, with no UI churn.
- *
- * The mock bodies are unchanged and still exported indirectly through these
- * wrappers, so scripts/flow-test.mjs keeps exercising the real preview flows.
+ * Other endpoints (shops, machines, orders) support both live and mock modes,
+ * controlled by VITE_API_LIVE_DATA. This allows the demo to work without a
+ * backend while still being ready for production use.
  */
 
 const delay = (ms = 320) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -56,9 +48,6 @@ export const isLiveMode = import.meta.env?.VITE_API_LIVE_DATA === 'true';
  * only once the route exists and is tested on the server.
  */
 const LIVE_ENDPOINTS = new Set([
-  // auth
-  'login',
-  'me',
   // shops and machines
   'getShops',
   'getShop',
@@ -118,69 +107,71 @@ async function withLive(name, liveFn, mockFn) {
 
 /* ------------------------------------------------------------------ auth --- */
 
+/**
+ * Authentication functions ALWAYS call the real backend.
+ * No mock fallback — fake auth would be a security vulnerability.
+ * If the backend is unreachable, these throw errors.
+ */
+
 // POST /api/auth/login
 export async function login({ email, password }) {
-  return withLive(
-    'login',
-    async () => {
-      const data = await apiClient.post('/api/auth/login', { email, password }, { auth: false });
+  const data = await apiClient.post('/api/auth/login', { email, password }, { auth: false });
 
-      // The API returns flat user fields plus the token; the UI expects the
-      // user's shop embedded so the header can render without a second call.
-      const user = data.user ?? {};
-      return {
-        token: data.accessToken,
-        refreshToken: data.refreshToken ?? null,
-        user: {
-          ...user,
-          shopName: user.shopName ?? user.shop?.name ?? null,
-          shop: user.shop ?? null,
-        },
-      };
+  // The API returns user fields plus tokens and shop context
+  const user = data.user ?? {};
+  return {
+    token: data.accessToken,
+    refreshToken: data.refreshToken ?? null,
+    user: {
+      id: user.id,
+      role: user.role,
+      name: user.name,
+      email: user.email,
+      shopId: user.shopId ?? null,
+      shopName: user.shop?.name ?? data.shop?.name ?? null,
+      shop: data.shop ?? user.shop ?? null,
     },
-    async () => {
-      await delay(560);
-      const account = DEMO_ACCOUNTS.find(
-        (a) => a.email.toLowerCase() === String(email).toLowerCase().trim(),
-      );
-      if (!account) throw new Error('No account found for that email address.');
-      if (account.password !== password) throw new Error('Incorrect password. Please try again.');
+  };
+}
 
-      const shop = account.shopId ? db.shops.find((s) => s.id === account.shopId) : null;
-      return {
-        token: `mock_jwt_${account.role}_${Date.now()}`,
-        user: {
-          id: account.id,
-          role: account.role,
-          name: account.name,
-          email: account.email,
-          title: account.title,
-          shopId: account.shopId,
-          shopName: account.shopName,
-          shop: shop ?? null,
-        },
-      };
+// POST /api/auth/register
+export async function register(registrationData) {
+  const data = await apiClient.post('/api/auth/register', registrationData, { auth: false });
+
+  const user = data.user ?? {};
+  return {
+    token: data.accessToken,
+    refreshToken: data.refreshToken ?? null,
+    user: {
+      id: user.id,
+      role: user.role,
+      name: user.name,
+      email: user.email,
+      shopId: user.shopId ?? null,
+      shopName: data.shopName ?? user.shop?.name ?? data.shop?.name ?? null,
+      shop: data.shop ?? user.shop ?? null,
     },
-  );
+  };
 }
 
 // GET /api/auth/me
-export async function me(token) {
-  return withLive(
-    'me',
-    async () => {
-      // The client attaches the bearer token from storage itself; `token` is
-      // accepted here so callers can pass it through unchanged.
-      return apiClient.get('/api/auth/me');
-    },
-    async () => {
-      await delay(200);
-      if (!token) throw new Error('Unauthenticated');
-      const role = token.split('_')[2];
-      const account = DEMO_ACCOUNTS.find((a) => a.role === role);
-      return account ? { role: account.role, name: account.name } : null;
-    },
-  );
+export async function me() {
+  return apiClient.get('/api/auth/me');
+}
+
+// POST /api/auth/password/forgot
+export async function requestPasswordReset({ email }) {
+  return apiClient.post('/api/auth/password/forgot', { email }, { auth: false });
+}
+
+// POST /api/auth/password/reset
+export async function confirmPasswordReset({ token, password }) {
+  return apiClient.post('/api/auth/password/reset', { token, password }, { auth: false });
+}
+
+// GET /api/auth/email-status
+export async function getEmailStatus() {
+  return apiClient.get('/api/auth/email-status', { auth: false });
 }
 
 /* ----------------------------------------------------------------- shops --- */
