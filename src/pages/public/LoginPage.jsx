@@ -161,19 +161,12 @@ export default function LoginPage() {
                       />
                       Keep me signed in
                     </label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        toast({
-                          type: 'info',
-                          title: 'Password reset unavailable in preview',
-                          description: 'Email delivery is not wired up yet.',
-                        })
-                      }
+                    <Link
+                      to="/forgot-password"
                       className="text-[12.5px] font-medium text-brand-600 hover:underline"
                     >
                       Forgot password?
-                    </button>
+                    </Link>
                   </div>
 
                   <Button

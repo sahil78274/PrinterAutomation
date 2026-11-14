@@ -1,31 +1,46 @@
 import {
   BarChart3,
+  Bell,
   CreditCard,
   LayoutDashboard,
   Monitor,
   Printer,
+  QrCode,
   ReceiptText,
   Settings,
   Store,
   Tags,
   Users,
+  FileSearch,
+  HeadphonesIcon,
+  Shield,
+  ClipboardList,
 } from 'lucide-react';
 
 export const shopNavigation = [
   { label: 'Overview', to: '/shop', icon: LayoutDashboard, end: true },
   { label: 'Orders', to: '/shop/orders', icon: ReceiptText },
+  { label: 'Print queue', to: '/shop/print-queue', icon: ClipboardList },
   { label: 'Machines', to: '/shop/machines', icon: Printer },
+  { label: 'QR codes', to: '/shop/qr-codes', icon: QrCode },
   { label: 'Pricing', to: '/shop/pricing', icon: Tags },
+  { label: 'Revenue', to: '/shop/revenue', icon: BarChart3 },
   { label: 'Payments', to: '/shop/payments', icon: CreditCard },
-  { label: 'Subscription', to: '/shop/subscription', icon: BarChart3 },
-  { label: 'Shop profile', to: '/shop/settings', icon: Settings },
+  { label: 'Subscription', to: '/shop/subscription', icon: Store },
+  { label: 'Staff', to: '/shop/staff', icon: Users },
+  { label: 'Notifications', to: '/shop/notifications', icon: Bell },
+  { label: 'Settings', to: '/shop/settings', icon: Settings },
 ];
 
 export const adminNavigation = [
   { label: 'Overview', to: '/admin', icon: LayoutDashboard, end: true },
   { label: 'Shops', to: '/admin/shops', icon: Store },
+  { label: 'Approvals', to: '/admin/approvals', icon: Shield },
   { label: 'Machines', to: '/admin/machines', icon: Monitor },
   { label: 'Print jobs', to: '/admin/jobs', icon: ReceiptText },
   { label: 'Subscriptions', to: '/admin/subscriptions', icon: Users },
   { label: 'Analytics', to: '/admin/analytics', icon: BarChart3 },
+  { label: 'Audit logs', to: '/admin/audit-logs', icon: FileSearch },
+  { label: 'Support', to: '/admin/support', icon: HeadphonesIcon },
+  { label: 'Settings', to: '/admin/settings', icon: Settings },
 ];
