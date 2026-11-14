@@ -101,6 +101,7 @@ describe('configuration validation', () => {
     const result = await validateConfigInFreshProcess({
       NODE_ENV: 'development',
       CLIENT_URL: '',
+      MONGODB_URI: 'mongodb://127.0.0.1:27017/smartprint_test',
     });
     assert.equal(result.ok, true);
   });
