@@ -115,9 +115,18 @@ export function createMongooseRepository() {
   return {
     async insert(name, doc) {
       try {
+        // CRITICAL FIX: Always generate a new ID for new documents.
+        // The previous code had a bug where if doc.id existed (e.g., from a 
+        // query result object being accidentally passed to insert), it would
+        // try to reuse that ID, causing MongoDB duplicate key errors.
+        //
+        // We extract all properties except 'id' from doc, then always generate
+        // a fresh UUID. This ensures each new document gets a unique ID.
+        const { id: existingId, ...docWithoutId } = doc;
+        
         const created = await getModel(name).create({
-          ...doc,
-          id: doc.id ?? randomUUID(),
+          ...docWithoutId,
+          id: randomUUID(),
           deletedAt: doc.deletedAt ?? null,
         });
         return toPlain(created);

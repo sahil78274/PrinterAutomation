@@ -127,9 +127,19 @@ export function createMemoryRepository({ collections = COLLECTIONS } = {}) {
     async insert(name, doc) {
       const collection = all(name);
       const now = new Date().toISOString();
+      
+      // CRITICAL FIX: Always generate a new ID for new documents.
+      // The previous code had a bug where if doc.id existed (e.g., from a 
+      // query result object being accidentally passed to insert), it would
+      // try to reuse that ID, causing duplicate key errors.
+      //
+      // We extract all properties except 'id' from doc, then always generate
+      // a fresh UUID. This ensures each new document gets a unique ID.
+      const { id: existingId, ...docWithoutId } = clone(doc);
+      
       const record = {
-        ...clone(doc),
-        id: doc.id ?? randomUUID(),
+        ...docWithoutId,
+        id: randomUUID(),
         createdAt: doc.createdAt ?? now,
         updatedAt: now,
         deletedAt: null,
